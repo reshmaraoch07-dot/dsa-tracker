@@ -1,0 +1,11 @@
+.env
+.env.local
+.git
+.github
+extension/
+helper-app/
+scratch/
+scripts/
+server/data/
+*.db
+*.db-journal

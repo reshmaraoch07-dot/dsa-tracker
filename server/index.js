@@ -629,6 +629,16 @@ app.post('/api/problems', async (req, res) => {
   }
 });
 
+// Global Express error handler middleware
+app.use((err, req, res, next) => {
+  console.error('[Express App Error]:', err);
+  res.status(err.status || 500).json({
+    error: true,
+    message: err.message || 'Internal Server Error',
+    stack: err.stack
+  });
+});
+
 // Only start standalone HTTP server if running directly (not in Vercel serverless environment)
 if (!process.env.VERCEL) {
   app.listen(PORT, () => {
