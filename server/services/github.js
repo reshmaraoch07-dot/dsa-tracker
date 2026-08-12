@@ -22,28 +22,34 @@ function parseRepoDetails() {
 }
 
 /**
- * Initializes Octokit REST client using dynamic import (for ES Module compatibility in CommonJS).
- */
-async function getOctokitClient() {
-  const token = process.env.GITHUB_TOKEN ? process.env.GITHUB_TOKEN.trim() : '';
-  if (!token || token === 'your_github_token_here') {
-    throw new Error('GITHUB_TOKEN is not configured in environment variables.');
-  }
-
-  const { Octokit } = await import('@octokit/rest');
-  return new Octokit({ auth: token });
-}
-
-/**
- * Ensures repo connection details are valid.
+ * Ensures repo connection details are valid using native fetch.
  */
 async function ensureRepoCloned() {
   try {
     const { owner, repo } = parseRepoDetails();
-    const octokit = await getOctokitClient();
-    const { data } = await octokit.rest.repos.get({ owner, repo });
-    console.log(`[GitHub Service] Connected to remote repository '${data.full_name}'.`);
-    return true;
+    const token = process.env.GITHUB_TOKEN ? process.env.GITHUB_TOKEN.trim() : '';
+
+    if (!token || token === 'your_github_token_here') {
+      console.warn('[GitHub Service] GITHUB_TOKEN is not configured.');
+      return false;
+    }
+
+    const res = await fetch(`https://api.github.com/repos/${owner}/${repo}`, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/vnd.github+json',
+        'User-Agent': 'DSA-Tracker-App'
+      }
+    });
+
+    if (res.ok) {
+      const data = await res.json();
+      console.log(`[GitHub Service] Connected to remote repository '${data.full_name}'.`);
+      return true;
+    } else {
+      console.warn('[GitHub Service] Repository check HTTP status:', res.status);
+      return false;
+    }
   } catch (err) {
     console.warn('[GitHub Service] Repository check warning:', err.message);
     return false;
@@ -51,37 +57,61 @@ async function ensureRepoCloned() {
 }
 
 /**
- * Commits or updates a single file in remote GitHub repository via REST API.
+ * Commits or updates a single file in remote GitHub repository via native fetch.
  */
-async function commitRemoteFile(octokit, owner, repo, filePath, content, commitMessage) {
+async function commitRemoteFile(owner, repo, token, filePath, content, commitMessage) {
   const base64Content = Buffer.from(content, 'utf8').toString('base64');
+  const fileApiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${filePath}`;
+
   let sha = undefined;
 
+  // Check if file already exists remotely to retrieve existing SHA
   try {
-    const { data } = await octokit.rest.repos.getContent({
-      owner,
-      repo,
-      path: filePath
+    const getRes = await fetch(fileApiUrl, {
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Accept': 'application/vnd.github+json',
+        'User-Agent': 'DSA-Tracker-App'
+      }
     });
-    if (data && data.sha) {
-      sha = data.sha;
+
+    if (getRes.ok) {
+      const getData = await getRes.json();
+      if (getData && getData.sha) {
+        sha = getData.sha;
+      }
     }
   } catch (err) {
     // File doesn't exist yet, proceed with sha = undefined
   }
 
-  await octokit.rest.repos.createOrUpdateFileContents({
-    owner,
-    repo,
-    path: filePath,
+  const putBody = {
     message: commitMessage,
-    content: base64Content,
-    sha: sha
+    content: base64Content
+  };
+  if (sha) {
+    putBody.sha = sha;
+  }
+
+  const putRes = await fetch(fileApiUrl, {
+    method: 'PUT',
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Accept': 'application/vnd.github+json',
+      'Content-Type': 'application/json',
+      'User-Agent': 'DSA-Tracker-App'
+    },
+    body: JSON.stringify(putBody)
   });
+
+  if (!putRes.ok) {
+    const errText = await putRes.text();
+    throw new Error(`GitHub API error (${putRes.status}): ${errText}`);
+  }
 }
 
 /**
- * Pushes a single problem's files to remote GitHub repository via Octokit API.
+ * Pushes a single problem's files to remote GitHub repository via GitHub REST API.
  */
 async function pushProblemToGithub(problemId) {
   const { data: problem, error: fetchErr } = await supabase
@@ -95,7 +125,11 @@ async function pushProblemToGithub(problemId) {
   }
 
   const { owner, repo } = parseRepoDetails();
-  const octokit = await getOctokitClient();
+  const token = process.env.GITHUB_TOKEN ? process.env.GITHUB_TOKEN.trim() : '';
+
+  if (!token || token === 'your_github_token_here') {
+    throw new Error('GITHUB_TOKEN is not configured in environment variables.');
+  }
 
   // 1. Determine folder path
   const platformFolder = (problem.platform || 'other').toLowerCase();
@@ -132,17 +166,17 @@ ${problem.question_statement || 'Refer to the original problem link above for st
   const commitMsg = `feat(solve): add ${problem.platform} - ${problem.title}`;
 
   // Write question.md
-  await commitRemoteFile(octokit, owner, repo, `${relFolderPath}/question.md`, questionContent, commitMsg);
+  await commitRemoteFile(owner, repo, token, `${relFolderPath}/question.md`, questionContent, commitMsg);
 
   // Write my_solution.{ext}
   if (problem.my_solution_code) {
-    await commitRemoteFile(octokit, owner, repo, `${relFolderPath}/my_solution.${ext}`, problem.my_solution_code, commitMsg);
+    await commitRemoteFile(owner, repo, token, `${relFolderPath}/my_solution.${ext}`, problem.my_solution_code, commitMsg);
   }
 
   // Write optimal_solution.{ext} if present
   if (problem.optimal_solution_code) {
     const optContent = `${problem.optimal_solution_code}\n\n/*\n=== EXPLANATION ===\n${problem.optimal_solution_explanation || ''}\n*/`;
-    await commitRemoteFile(octokit, owner, repo, `${relFolderPath}/optimal_solution.${ext}`, optContent, commitMsg);
+    await commitRemoteFile(owner, repo, token, `${relFolderPath}/optimal_solution.${ext}`, optContent, commitMsg);
   }
 
   // 4. Update problem row in Supabase
