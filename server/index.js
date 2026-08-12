@@ -639,8 +639,8 @@ app.use((err, req, res, next) => {
   });
 });
 
-// Only start standalone HTTP server if running directly (not in Vercel serverless environment)
-if (!process.env.VERCEL) {
+// Only start standalone HTTP server if running directly as main module
+if (require.main === module && !process.env.VERCEL) {
   app.listen(PORT, () => {
     console.log(`[Server] DSA Tracker running on http://localhost:${PORT}`);
     ensureRepoCloned();
