@@ -1,168 +1,160 @@
-const cheerio = require('cheerio');
-const db = require('../db/init');
+const supabase = require('../db/init');
 
 /**
- * Maps Codeforces problem rating to difficulty tier:
- * - rating < 1200: Easy
- * - 1200 <= rating <= 1900: Medium
- * - rating > 1900: Hard
- */
-function getDifficulty(rating) {
-  if (typeof rating !== 'number') return 'Easy';
-  if (rating < 1200) return 'Easy';
-  if (rating <= 1900) return 'Medium';
-  return 'Hard';
-}
-
-/**
- * Fetches and parses Codeforces submission HTML page to extract source code.
- */
-async function fetchSubmissionCode(contestId, submissionId) {
-  const url = `https://codeforces.com/contest/${contestId}/submission/${submissionId}`;
-  try {
-    const response = await fetch(url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9'
-      }
-    });
-
-    if (!response.ok) {
-      console.warn(`[Codeforces Service] HTML fetch returned ${response.status} for submission ${submissionId}`);
-      return null;
-    }
-
-    const html = await response.text();
-    const $ = cheerio.load(html);
-    let code = $('#program-source-text').text();
-
-    if (!code) {
-      const match = html.match(/id=["']program-source-text["'][^>]*>([\s\S]*?)<\/pre>/i);
-      if (match && match[1]) {
-        code = match[1];
-      }
-    }
-
-    return code ? code.trim() : null;
-  } catch (err) {
-    console.error(`[Codeforces Service] Could not fetch code for submission ${submissionId}:`, err.message);
-    return null;
-  }
-}
-
-/**
- * Main Codeforces sync function.
+ * Syncs recent Accepted submissions from Codeforces user status API.
  */
 async function syncCodeforces() {
-  let handle = null;
-  try {
-    // 1. Get saved handle from settings table
-    const handleRow = db.prepare("SELECT value FROM settings WHERE key = 'codeforces_handle'").get();
-    handle = handleRow ? handleRow.value.trim() : null;
+  console.log('[Codeforces Sync] Starting Codeforces sync process...');
 
-    if (!handle) {
-      const errMsg = 'Codeforces handle not set in Settings page.';
-      db.prepare(`
-        INSERT INTO sync_log (platform, action, status, message)
-        VALUES ('codeforces', 'fetch', 'error', ?)
-      `).run(errMsg);
-      return { success: false, count: 0, message: errMsg };
+  // 1. Read handle from settings table
+  const { data: settingRow, error: settingErr } = await supabase
+    .from('settings')
+    .select('value')
+    .eq('key', 'codeforces_handle')
+    .single();
+
+  if (settingErr || !settingRow || !settingRow.value) {
+    throw new Error('Codeforces handle is not configured in settings.');
+  }
+
+  const handle = settingRow.value.trim();
+  console.log(`[Codeforces Sync] Fetching recent submissions for handle '${handle}'...`);
+
+  // 2. Fetch submissions from Codeforces API
+  const cfApiUrl = `https://codeforces.com/api/user.status?handle=${encodeURIComponent(handle)}&from=1&count=50`;
+  const response = await fetch(cfApiUrl);
+
+  if (!response.ok) {
+    throw new Error(`Codeforces API returned HTTP status ${response.status}`);
+  }
+
+  const cfData = await response.json();
+
+  if (cfData.status !== 'OK' || !Array.isArray(cfData.result)) {
+    throw new Error(cfData.comment || 'Failed to fetch user submissions from Codeforces API.');
+  }
+
+  const submissions = cfData.result;
+  let addedCount = 0;
+
+  for (const sub of submissions) {
+    if (sub.verdict !== 'OK') continue;
+    if (!sub.problem || !sub.contestId) continue;
+
+    const contestId = sub.contestId;
+    const index = sub.problem.index;
+    const submissionId = sub.id;
+    const platformProblemId = `${contestId}${index}`;
+
+    // Check if submission already exists in Supabase
+    const { data: existing, error: checkErr } = await supabase
+      .from('problems')
+      .select('id')
+      .eq('platform', 'codeforces')
+      .eq('platform_problem_id', platformProblemId)
+      .maybeSingle();
+
+    if (existing) {
+      continue; // Duplicate, skip
     }
 
-    console.log(`[Codeforces Service] Fetching user status for handle: ${handle}`);
+    const title = `${sub.problem.name} (${contestId}${index})`;
+    const problemUrl = `https://codeforces.com/contest/${contestId}/problem/${index}`;
+    const topicsArr = Array.isArray(sub.problem.tags) ? sub.problem.tags : [];
+    
+    let difficulty = 'Medium';
+    if (sub.problem.rating) {
+      if (sub.problem.rating < 1300) difficulty = 'Easy';
+      else if (sub.problem.rating < 1900) difficulty = 'Medium';
+      else difficulty = 'Hard';
+    }
 
-    // 2. Call Codeforces user.status API
-    const apiUrl = `https://codeforces.com/api/user.status?handle=${encodeURIComponent(handle)}&from=1&count=50`;
-    const apiRes = await fetch(apiUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36'
+    // Save custom topics into topics_master
+    for (const tag of topicsArr) {
+      if (tag && typeof tag === 'string') {
+        await supabase
+          .from('topics_master')
+          .upsert({ name: tag.trim() }, { onConflict: 'name' });
       }
+    }
+
+    // Fetch submission source code from HTML page
+    const subPageUrl = `https://codeforces.com/contest/${contestId}/submission/${submissionId}`;
+    let code = '// Source code unavailable';
+    let lang = sub.programmingLanguage || 'C++';
+
+    try {
+      const pageRes = await fetch(subPageUrl);
+      if (pageRes.ok) {
+        const htmlText = await pageRes.text();
+        const preMatch = htmlText.match(/<pre[^>]*id=["']program-source-text["'][^>]*>([\s\S]*?)<\/pre>/i);
+        if (preMatch && preMatch[1]) {
+          code = decodeHtmlEntities(preMatch[1].trim());
+        }
+      }
+    } catch (codeErr) {
+      console.warn(`[Codeforces Sync] Failed to fetch source code for submission ${submissionId}:`, codeErr.message);
+    }
+
+    const solvedAt = sub.creationTimeSeconds
+      ? new Date(sub.creationTimeSeconds * 1000).toISOString()
+      : new Date().toISOString();
+
+    const statement = `Codeforces Problem: ${title}\nContest ID: ${contestId}, Index: ${index}\nRating: ${sub.problem.rating || 'Unrated'}\nOriginal URL: ${problemUrl}`;
+
+    // Insert new problem into Supabase
+    const { error: insertErr } = await supabase
+      .from('problems')
+      .insert({
+        platform: 'codeforces',
+        platform_problem_id: platformProblemId,
+        title: title,
+        url: problemUrl,
+        difficulty: difficulty,
+        topics: topicsArr, // Native JSONB array!
+        question_statement: statement,
+        my_solution_code: code,
+        my_solution_language: lang,
+        solved_at: solvedAt,
+        pushed_to_github: false
+      });
+
+    if (insertErr) {
+      console.error(`[Codeforces Sync] Insert error for ${title}:`, insertErr.message);
+    } else {
+      console.log(`[Codeforces Sync] Successfully added new problem: ${title}`);
+      addedCount++;
+    }
+  }
+
+  // Log sync action in sync_log
+  await supabase
+    .from('sync_log')
+    .insert({
+      platform: 'codeforces',
+      action: 'sync_codeforces',
+      status: 'success',
+      message: `Synced ${addedCount} new problem(s) from Codeforces`
     });
 
-    if (!apiRes.ok) {
-      throw new Error(`Codeforces API returned HTTP ${apiRes.status}`);
-    }
+  return {
+    success: true,
+    count: addedCount,
+    message: `Successfully synced ${addedCount} new problem(s) from Codeforces.`
+  };
+}
 
-    const apiData = await apiRes.json();
-    if (apiData.status !== 'OK' || !Array.isArray(apiData.result)) {
-      throw new Error(apiData.comment || 'Failed to fetch status from Codeforces API');
-    }
-
-    // 3. Filter submissions to verdict === 'OK'
-    const acceptedSubmissions = apiData.result.filter(sub => sub.verdict === 'OK' && sub.problem && sub.contestId);
-    console.log(`[Codeforces Service] Found ${acceptedSubmissions.length} accepted submissions in recent 50.`);
-
-    let newCount = 0;
-    const checkProblemExists = db.prepare(
-      "SELECT id FROM problems WHERE platform = 'codeforces' AND platform_problem_id = ?"
-    );
-    const insertProblem = db.prepare(`
-      INSERT INTO problems (
-        platform, platform_problem_id, title, url, difficulty,
-        topics, question_statement, my_solution_code, my_solution_language,
-        solved_at, pushed_to_github
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
-    `);
-
-    for (const sub of acceptedSubmissions) {
-      const contestId = sub.contestId;
-      const index = sub.problem.index;
-      const platformProblemId = `${contestId}${index}`;
-
-      // Check if problem is already saved
-      const existing = checkProblemExists.get(platformProblemId);
-      if (existing) {
-        continue;
-      }
-
-      console.log(`[Codeforces Service] Processing new problem: ${platformProblemId} - ${sub.problem.name}`);
-
-      // Rate limiting: 1.2s delay between submission fetches
-      await new Promise(res => setTimeout(res, 1200));
-
-      const sourceCode = await fetchSubmissionCode(contestId, sub.id);
-      const submissionUrl = `https://codeforces.com/contest/${contestId}/submission/${sub.id}`;
-      const problemUrl = `https://codeforces.com/contest/${contestId}/problem/${index}`;
-      const difficulty = getDifficulty(sub.problem.rating);
-      const topics = JSON.stringify(sub.problem.tags || []);
-      const solvedAt = new Date(sub.creationTimeSeconds * 1000).toISOString();
-      const codeContent = sourceCode || `// Source code viewable at ${submissionUrl}`;
-
-      insertProblem.run(
-        'codeforces',
-        platformProblemId,
-        sub.problem.name,
-        problemUrl,
-        difficulty,
-        topics,
-        null, // question_statement
-        codeContent,
-        sub.programmingLanguage || '',
-        solvedAt
-      );
-
-      newCount++;
-    }
-
-    const logMessage = `Successfully synced ${newCount} new Codeforces problem(s) for handle '${handle}'.`;
-    db.prepare(`
-      INSERT INTO sync_log (platform, action, status, message)
-      VALUES ('codeforces', 'fetch', 'success', ?)
-    `).run(logMessage);
-
-    console.log(`[Codeforces Service] ${logMessage}`);
-    return { success: true, count: newCount, message: logMessage };
-
-  } catch (err) {
-    console.error('[Codeforces Service] Sync failed:', err);
-    const errMsg = `Codeforces sync failed: ${err.message}`;
-    db.prepare(`
-      INSERT INTO sync_log (platform, action, status, message)
-      VALUES ('codeforces', 'fetch', 'error', ?)
-    `).run(errMsg);
-    return { success: false, count: 0, message: errMsg };
-  }
+/**
+ * Decodes HTML entities from scraped code text.
+ */
+function decodeHtmlEntities(str) {
+  return str
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, ' ');
 }
 
 module.exports = { syncCodeforces };

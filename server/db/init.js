@@ -1,66 +1,23 @@
-const path = require('path');
-const fs = require('fs');
-const Database = require('better-sqlite3');
+const supabase = require('./supabaseClient');
 
-// Ensure server/data directory exists
-const dataDir = path.join(__dirname, '../data');
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true });
-}
+/**
+ * Helper to ensure Supabase client connection is ready.
+ */
+async function initDb() {
+  try {
+    const { count, error } = await supabase
+      .from('problems')
+      .select('*', { count: 'exact', head: true });
 
-const dbPath = path.join(dataDir, 'tracker.db');
-const db = new Database(dbPath);
-
-// Enable WAL mode for performance & foreign keys
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
-
-function initDatabase() {
-  const schemaPath = path.join(__dirname, 'schema.sql');
-  const schemaSql = fs.readFileSync(schemaPath, 'utf8');
-
-  // Execute schema SQL commands
-  db.exec(schemaSql);
-
-  // Default topics for topics_master
-  const defaultTopics = [
-    'Array',
-    'String',
-    'Linked List',
-    'Stack',
-    'Queue',
-    'Tree',
-    'Binary Search Tree',
-    'Heap',
-    'Graph',
-    'Dynamic Programming',
-    'Greedy',
-    'Backtracking',
-    'Trie',
-    'Bit Manipulation',
-    'Sliding Window',
-    'Two Pointers',
-    'Math',
-    'Recursion',
-    'Sorting',
-    'Binary Search',
-    'Union Find',
-    'Segment Tree'
-  ];
-
-  const insertTopic = db.prepare('INSERT OR IGNORE INTO topics_master (name) VALUES (?)');
-  const insertMany = db.transaction((topics) => {
-    for (const topic of topics) {
-      insertTopic.run(topic);
+    if (error) {
+      console.warn('[Supabase Database] Initial query notice:', error.message);
+    } else {
+      console.log(`[Supabase Database] Connected successfully. Total problems in DB: ${count || 0}`);
     }
-  });
-
-  insertMany(defaultTopics);
-  console.log('[Database] Schema initialized & topics_master pre-populated.');
-  return db;
+  } catch (err) {
+    console.error('[Supabase Database] Connection error:', err.message);
+  }
 }
 
-// Automatically initialize database on module require
-initDatabase();
-
-module.exports = db;
+module.exports = supabase;
+module.exports.initDb = initDb;

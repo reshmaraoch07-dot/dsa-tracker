@@ -1,32 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
-const fs = require('fs');
-const Database = require('better-sqlite3');
-require('dotenv').config();
-
-const app = express();
-const PORT = process.env.PORT || 4545;
-
-// CORS configuration to allow chrome-extension:// origins, localhost, and standard HTTP methods/headers
-app.use(cors({
-  origin: (origin, callback) => {
-    if (!origin || origin.startsWith('chrome-extension://') || origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1')) {
-      return callback(null, true);
-    }
-    return callback(null, true);
-  },
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
-}));
-
-// Middleware
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
-
-// Database initialization (stored at /server/data/tracker.db via server/db/init.js)
-const db = require('./db/init');
+const supabase = require('./db/init');
 
 const { syncCodeforces } = require('./services/codeforces');
 const { ensureRepoCloned, pushProblemToGithub, pushAllUnpushedProblems } = require('./services/github');
@@ -34,65 +9,86 @@ const { getSummaryStats, getHeatmapData, getTopicStats, getWeakTopics } = requir
 const { generateOptimalSolution, suggestTopicsAndDifficulty } = require('./services/ai');
 const { initScheduler } = require('./services/scheduler');
 
-// 1. Serve /public as static files
+const app = express();
+const PORT = process.env.PORT || 4545;
+
+// Middleware
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Serve static UI assets from /public
 app.use(express.static(path.join(__dirname, '../public')));
 
-// 2. Health check route returning { status: "ok" }
+// Health check
 app.get('/api/health', (req, res) => {
   res.json({ status: "ok" });
 });
 
-// GET /api/stats/summary - Header metrics (Total Solved, Current Streak, Longest Streak)
-app.get('/api/stats/summary', (req, res) => {
+// GET /api/stats/summary - Summary stats
+app.get('/api/stats/summary', async (req, res) => {
   try {
-    res.json(getSummaryStats());
+    const stats = await getSummaryStats();
+    res.json(stats);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 // GET /api/stats/heatmap - Heatmap solve counts per date
-app.get('/api/stats/heatmap', (req, res) => {
+app.get('/api/stats/heatmap', async (req, res) => {
   try {
-    res.json(getHeatmapData());
+    const data = await getHeatmapData();
+    res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// GET /api/stats/topics - Topic coverage counts
-app.get('/api/stats/topics', (req, res) => {
+// GET /api/stats/topics - Topic coverage breakdown
+app.get('/api/stats/topics', async (req, res) => {
   try {
-    res.json(getTopicStats());
+    const stats = await getTopicStats();
+    res.json(stats);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// GET /api/stats/weak-topics - Weakest / untouched topics for practice recommendations
-app.get('/api/stats/weak-topics', (req, res) => {
+// GET /api/stats/weak-topics - Weakest/untouched topics
+app.get('/api/stats/weak-topics', async (req, res) => {
   try {
     const limit = req.query.limit ? parseInt(req.query.limit, 10) : 5;
-    res.json(getWeakTopics(limit));
+    const topics = await getWeakTopics(limit);
+    res.json(topics);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 // GET /api/stats/automation-status - Latest automated sync and push logs
-app.get('/api/stats/automation-status', (req, res) => {
+app.get('/api/stats/automation-status', async (req, res) => {
   try {
-    const lastCfSync = db.prepare(`
-      SELECT * FROM sync_log
-      WHERE action IN ('sync_codeforces', 'fetch') OR platform = 'codeforces'
-      ORDER BY id DESC LIMIT 1
-    `).get();
+    const { data: lastCfSync } = await supabase
+      .from('sync_log')
+      .select('*')
+      .or("action.eq.sync_codeforces,action.eq.fetch,platform.eq.codeforces")
+      .order('id', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-    const lastGithubPush = db.prepare(`
-      SELECT * FROM sync_log
-      WHERE action IN ('push_github', 'push') OR platform = 'github'
-      ORDER BY id DESC LIMIT 1
-    `).get();
+    const { data: lastGithubPush } = await supabase
+      .from('sync_log')
+      .select('*')
+      .or("action.eq.push_github,action.eq.push,platform.eq.github")
+      .order('id', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
     res.json({
       success: true,
@@ -105,9 +101,15 @@ app.get('/api/stats/automation-status', (req, res) => {
 });
 
 // GET /api/export - Full JSON database backup download
-app.get('/api/export', (req, res) => {
+app.get('/api/export', async (req, res) => {
   try {
-    const problems = db.prepare('SELECT * FROM problems ORDER BY id ASC').all();
+    const { data: problems, error } = await supabase
+      .from('problems')
+      .select('*')
+      .order('id', { ascending: true });
+
+    if (error) throw new Error(error.message);
+
     const dateStr = new Date().toISOString().split('T')[0];
 
     res.setHeader('Content-Type', 'application/json');
@@ -119,9 +121,15 @@ app.get('/api/export', (req, res) => {
 });
 
 // GET /api/export/csv - CSV format backup download
-app.get('/api/export/csv', (req, res) => {
+app.get('/api/export/csv', async (req, res) => {
   try {
-    const problems = db.prepare('SELECT * FROM problems ORDER BY id ASC').all();
+    const { data: problems, error } = await supabase
+      .from('problems')
+      .select('*')
+      .order('id', { ascending: true });
+
+    if (error) throw new Error(error.message);
+
     const dateStr = new Date().toISOString().split('T')[0];
 
     const escapeCsv = (val) => {
@@ -144,11 +152,15 @@ app.get('/api/export/csv', (req, res) => {
 
     for (const p of problems) {
       let topicsStr = '';
-      try {
-        const parsed = JSON.parse(p.topics || '[]');
-        if (Array.isArray(parsed)) topicsStr = parsed.join(', ');
-      } catch (_) {
-        topicsStr = p.topics || '';
+      if (Array.isArray(p.topics)) {
+        topicsStr = p.topics.join(', ');
+      } else if (typeof p.topics === 'string') {
+        try {
+          const parsed = JSON.parse(p.topics);
+          if (Array.isArray(parsed)) topicsStr = parsed.join(', ');
+        } catch (_) {
+          topicsStr = p.topics;
+        }
       }
 
       const row = [
@@ -182,7 +194,7 @@ app.get('/api/export/csv', (req, res) => {
 });
 
 // POST /api/import - Restore problems from JSON backup
-app.post('/api/import', (req, res) => {
+app.post('/api/import', async (req, res) => {
   try {
     let rawItems = req.body;
     if (rawItems && !Array.isArray(rawItems) && Array.isArray(rawItems.problems)) {
@@ -196,63 +208,51 @@ app.post('/api/import', (req, res) => {
     let count = 0;
     let skipped = 0;
 
-    const stmt = db.prepare(`
-      INSERT OR IGNORE INTO problems (
-        platform, platform_problem_id, title, url, difficulty, topics,
-        question_statement, my_solution_code, my_solution_language,
-        optimal_solution_code, optimal_solution_explanation, solved_at,
-        pushed_to_github, github_file_path
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    const insertTopic = db.prepare('INSERT OR IGNORE INTO topics_master (name) VALUES (?)');
-
     for (const item of rawItems) {
       if (!item.platform || !item.platform_problem_id || !item.title) {
         skipped++;
         continue;
       }
 
-      // Save custom topics into topics_master
       let topicsArr = [];
-      try {
-        if (Array.isArray(item.topics)) topicsArr = item.topics;
-        else if (typeof item.topics === 'string') topicsArr = JSON.parse(item.topics);
-      } catch (_) {}
+      if (Array.isArray(item.topics)) topicsArr = item.topics;
+      else if (typeof item.topics === 'string') {
+        try { topicsArr = JSON.parse(item.topics); } catch (_) {}
+      }
 
-      topicsArr.forEach(t => {
+      // Add topics to topics_master
+      for (const t of topicsArr) {
         if (t && typeof t === 'string' && t.trim()) {
-          insertTopic.run(t.trim());
+          await supabase.from('topics_master').upsert({ name: t.trim() }, { onConflict: 'name' });
         }
-      });
+      }
 
-      const topicsJson = Array.isArray(item.topics) ? JSON.stringify(item.topics) : (typeof item.topics === 'string' ? item.topics : '[]');
+      const { data, error } = await supabase
+        .from('problems')
+        .upsert({
+          platform: String(item.platform).toLowerCase().trim(),
+          platform_problem_id: String(item.platform_problem_id).trim(),
+          title: String(item.title).trim(),
+          url: item.url || '',
+          difficulty: item.difficulty || 'Medium',
+          topics: topicsArr,
+          question_statement: item.question_statement || '',
+          my_solution_code: item.my_solution_code || '',
+          my_solution_language: item.my_solution_language || 'C++',
+          optimal_solution_code: item.optimal_solution_code || null,
+          optimal_solution_explanation: item.optimal_solution_explanation || null,
+          solved_at: item.solved_at || new Date().toISOString(),
+          pushed_to_github: Boolean(item.pushed_to_github),
+          github_file_path: item.github_file_path || null
+        }, { onConflict: 'platform, platform_problem_id', ignoreDuplicates: true })
+        .select();
 
-      const info = stmt.run(
-        String(item.platform).toLowerCase().trim(),
-        String(item.platform_problem_id).trim(),
-        String(item.title).trim(),
-        item.url || '',
-        item.difficulty || 'Medium',
-        topicsJson,
-        item.question_statement || '',
-        item.my_solution_code || '',
-        item.my_solution_language || 'C++',
-        item.optimal_solution_code || null,
-        item.optimal_solution_explanation || null,
-        item.solved_at || new Date().toISOString(),
-        item.pushed_to_github ? 1 : 0,
-        item.github_file_path || null
-      );
-
-      if (info.changes > 0) {
+      if (data && data.length > 0) {
         count++;
       } else {
         skipped++;
       }
     }
-
-    console.log(`[Database Import] Restored ${count} problem(s), skipped ${skipped} duplicate(s).`);
 
     res.json({
       success: true,
@@ -261,17 +261,21 @@ app.post('/api/import', (req, res) => {
       message: `Import complete! ${count} problem(s) restored, ${skipped} duplicate(s) skipped.`
     });
   } catch (err) {
-    console.error('[Database Import] Error:', err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
 // GET /api/settings - Fetch saved settings
-app.get('/api/settings', (req, res) => {
+app.get('/api/settings', async (req, res) => {
   try {
-    const rows = db.prepare('SELECT key, value FROM settings').all();
+    const { data: rows, error } = await supabase
+      .from('settings')
+      .select('key, value');
+
+    if (error) throw new Error(error.message);
+
     const settings = {};
-    rows.forEach(r => { settings[r.key] = r.value; });
+    (rows || []).forEach(r => { settings[r.key] = r.value; });
     res.json(settings);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -279,19 +283,13 @@ app.get('/api/settings', (req, res) => {
 });
 
 // POST /api/settings - Save/update setting key-value pairs
-app.post('/api/settings', (req, res) => {
+app.post('/api/settings', async (req, res) => {
   try {
-    const upsert = db.prepare(`
-      INSERT INTO settings (key, value, updated_at)
-      VALUES (?, ?, CURRENT_TIMESTAMP)
-      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
-    `);
-
     if (req.body.key && req.body.value !== undefined) {
-      upsert.run(req.body.key, req.body.value);
+      await supabase.from('settings').upsert({ key: req.body.key, value: String(req.body.value) }, { onConflict: 'key' });
     } else {
       for (const [key, value] of Object.entries(req.body)) {
-        upsert.run(key, String(value));
+        await supabase.from('settings').upsert({ key, value: String(value) }, { onConflict: 'key' });
       }
     }
     res.json({ success: true, message: 'Settings updated successfully' });
@@ -320,7 +318,7 @@ app.post('/api/push/all', async (req, res) => {
   }
 });
 
-// POST /api/push/:problemId - Push a single problem to GitHub
+// POST /api/push/:problemId - Push single problem to GitHub
 app.post('/api/push/:problemId', async (req, res) => {
   try {
     const result = await pushProblemToGithub(req.params.problemId);
@@ -333,8 +331,13 @@ app.post('/api/push/:problemId', async (req, res) => {
 // POST /api/problems/:id/generate-optimal - Generate AI optimal solution
 app.post('/api/problems/:id/generate-optimal', async (req, res) => {
   try {
-    const problem = db.prepare('SELECT * FROM problems WHERE id = ?').get(req.params.id);
-    if (!problem) {
+    const { data: problem, error } = await supabase
+      .from('problems')
+      .select('*')
+      .eq('id', req.params.id)
+      .single();
+
+    if (error || !problem) {
       return res.status(404).json({ success: false, error: 'Problem not found' });
     }
 
@@ -348,8 +351,13 @@ app.post('/api/problems/:id/generate-optimal', async (req, res) => {
 // POST /api/problems/:id/auto-tag - AI Auto-tag a single problem
 app.post('/api/problems/:id/auto-tag', async (req, res) => {
   try {
-    const problem = db.prepare('SELECT * FROM problems WHERE id = ?').get(req.params.id);
-    if (!problem) {
+    const { data: problem, error } = await supabase
+      .from('problems')
+      .select('*')
+      .eq('id', req.params.id)
+      .single();
+
+    if (error || !problem) {
       return res.status(404).json({ success: false, error: 'Problem not found' });
     }
 
@@ -360,16 +368,16 @@ app.post('/api/problems/:id/auto-tag', async (req, res) => {
   }
 });
 
-// POST /api/problems/auto-tag-all - Bulk AI Auto-tag all problems missing topics/difficulty
+// POST /api/problems/auto-tag-all - Bulk AI Auto-tag missing problems
 app.post('/api/problems/auto-tag-all', async (req, res) => {
   try {
-    const missingProblems = db.prepare(`
-      SELECT * FROM problems
-      WHERE topics IS NULL OR topics = '[]' OR topics = '' OR difficulty IS NULL OR difficulty = ''
-      ORDER BY id ASC
-    `).all();
+    const { data: missingProblems, error } = await supabase
+      .from('problems')
+      .select('*')
+      .or("topics.is.null,topics.eq.[],difficulty.is.null")
+      .order('id', { ascending: true });
 
-    if (missingProblems.length === 0) {
+    if (error || !missingProblems || missingProblems.length === 0) {
       return res.json({ success: true, count: 0, total: 0, message: 'No problems missing topic or difficulty data.' });
     }
 
@@ -383,7 +391,6 @@ app.post('/api/problems/auto-tag-all', async (req, res) => {
       } catch (probErr) {
         errors.push({ id: prob.id, title: prob.title, error: probErr.message });
       }
-      // 800ms delay between calls to observe Gemini API rate limits
       await new Promise(resolve => setTimeout(resolve, 800));
     }
 
@@ -399,8 +406,8 @@ app.post('/api/problems/auto-tag-all', async (req, res) => {
   }
 });
 
-// POST /api/capture - Capture solution payload from Chrome extension
-app.post('/api/capture', (req, res) => {
+// POST /api/capture - Extension auto-capture endpoint
+app.post('/api/capture', async (req, res) => {
   try {
     const {
       platform = 'leetcode',
@@ -412,249 +419,223 @@ app.post('/api/capture', (req, res) => {
       question_statement = '',
       my_solution_code = '',
       my_solution_language = 'C++',
-      solved_at = new Date().toISOString()
-    } = req.body;
-
-    if (!platform_problem_id) {
-      return res.status(400).json({ success: false, error: 'platform_problem_id is required' });
-    }
-
-    const cleanPlatform = String(platform).toLowerCase();
-    const cleanId = String(platform_problem_id).trim();
-    const cleanTitle = title ? String(title).trim() : cleanId;
-    const cleanUrl = url ? String(url).trim() : `https://${cleanPlatform}.com/problems/${cleanId}`;
-
-    const topicsJson = Array.isArray(topics) ? JSON.stringify(topics) : (typeof topics === 'string' ? topics : '[]');
-
-    // Insert any new topics into topics_master
-    if (Array.isArray(topics)) {
-      const insertTopic = db.prepare('INSERT OR IGNORE INTO topics_master (name) VALUES (?)');
-      topics.forEach(t => { if (t && typeof t === 'string') insertTopic.run(t.trim()); });
-    }
-
-    // Insert or Replace into SQLite problems table
-    const stmt = db.prepare(`
-      INSERT INTO problems (
-        platform, platform_problem_id, title, url, difficulty, topics,
-        question_statement, my_solution_code, my_solution_language, solved_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(platform, platform_problem_id) DO UPDATE SET
-        title = excluded.title,
-        url = excluded.url,
-        difficulty = excluded.difficulty,
-        topics = excluded.topics,
-        question_statement = CASE WHEN length(excluded.question_statement) > 0 THEN excluded.question_statement ELSE question_statement END,
-        my_solution_code = CASE WHEN length(excluded.my_solution_code) > 0 THEN excluded.my_solution_code ELSE my_solution_code END,
-        my_solution_language = excluded.my_solution_language,
-        solved_at = excluded.solved_at
-    `);
-
-    const info = stmt.run(
-      cleanPlatform,
-      cleanId,
-      cleanTitle,
-      cleanUrl,
-      difficulty,
-      topicsJson,
-      question_statement,
-      my_solution_code,
-      my_solution_language,
       solved_at
-    );
-
-    // Retrieve problem record ID
-    const problem = db.prepare('SELECT id FROM problems WHERE platform = ? AND platform_problem_id = ?').get(cleanPlatform, cleanId);
-
-    console.log(`[Extension Capture] Saved '${cleanTitle}' (${cleanPlatform}:${cleanId}) -> Problem ID ${problem.id}`);
-
-    res.json({
-      success: true,
-      problemId: problem.id,
-      message: `Successfully captured problem '${cleanTitle}'`
-    });
-  } catch (err) {
-    console.error('[Extension Capture] Error:', err);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// POST /api/problems - Manual problem entry
-app.post('/api/problems', (req, res) => {
-  try {
-    const {
-      platform = 'other',
-      platform_problem_id,
-      title,
-      url,
-      difficulty = 'Medium',
-      topics = [],
-      question_statement = '',
-      my_solution_code = '',
-      my_solution_language = 'C++',
-      solved_at = new Date().toISOString()
     } = req.body;
 
-    if (!title || !title.trim()) {
-      return res.status(400).json({ success: false, error: 'Problem title is required.' });
+    if (!platform_problem_id || !title) {
+      return res.status(400).json({ success: false, error: 'Missing platform_problem_id or title' });
     }
 
-    const cleanPlatform = String(platform).toLowerCase().trim();
-    const cleanTitle = String(title).trim();
-    
-    // Auto-generate platform_problem_id if not provided
-    const cleanId = (platform_problem_id && String(platform_problem_id).trim())
-      ? String(platform_problem_id).trim()
-      : cleanTitle.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '');
-
-    const cleanUrl = (url && String(url).trim()) ? String(url).trim() : `https://${cleanPlatform}.com/problems/${cleanId}`;
-
-    // Normalize topics array & save custom topics into topics_master
-    let topicsArray = [];
-    if (Array.isArray(topics)) topicsArray = topics;
-    else if (typeof topics === 'string') {
-      try { topicsArray = JSON.parse(topics); } catch (_) { topicsArray = [topics]; }
-    }
-
-    const insertTopic = db.prepare('INSERT OR IGNORE INTO topics_master (name) VALUES (?)');
-    topicsArray.forEach(t => {
+    const topicsArr = Array.isArray(topics) ? topics : [];
+    for (const t of topicsArr) {
       if (t && typeof t === 'string' && t.trim()) {
-        insertTopic.run(t.trim());
+        await supabase.from('topics_master').upsert({ name: t.trim() }, { onConflict: 'name' });
       }
-    });
-
-    const topicsJson = JSON.stringify(topicsArray);
-
-    const stmt = db.prepare(`
-      INSERT INTO problems (
-        platform, platform_problem_id, title, url, difficulty, topics,
-        question_statement, my_solution_code, my_solution_language, solved_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(platform, platform_problem_id) DO UPDATE SET
-        title = excluded.title,
-        url = excluded.url,
-        difficulty = excluded.difficulty,
-        topics = excluded.topics,
-        question_statement = excluded.question_statement,
-        my_solution_code = excluded.my_solution_code,
-        my_solution_language = excluded.my_solution_language,
-        solved_at = excluded.solved_at
-    `);
-
-    stmt.run(
-      cleanPlatform,
-      cleanId,
-      cleanTitle,
-      cleanUrl,
-      difficulty,
-      topicsJson,
-      question_statement,
-      my_solution_code,
-      my_solution_language,
-      solved_at
-    );
-
-    const problem = db.prepare('SELECT id FROM problems WHERE platform = ? AND platform_problem_id = ?').get(cleanPlatform, cleanId);
-
-    console.log(`[Manual Entry] Saved problem '${cleanTitle}' (${cleanPlatform}:${cleanId}) -> Problem ID ${problem.id}`);
-
-    res.json({
-      success: true,
-      problemId: problem.id,
-      message: `Problem '${cleanTitle}' saved successfully!`
-    });
-  } catch (err) {
-    console.error('[Manual Entry] Error:', err);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// In-memory Draft Store for Desktop Helper App / Clipboard Captures
-let latestDraft = null;
-
-// POST /api/draft - Save clipboard draft solution
-app.post('/api/draft', (req, res) => {
-  try {
-    const { platform = 'hive', code = '', capturedAt = new Date().toISOString() } = req.body;
-
-    latestDraft = {
-      platform: String(platform).toLowerCase().trim(),
-      code: String(code),
-      capturedAt: String(capturedAt)
-    };
-
-    console.log(`[Draft Store] Saved draft for platform '${latestDraft.platform}' (${latestDraft.code.length} bytes)`);
-
-    res.json({
-      success: true,
-      message: 'Draft saved successfully',
-      draft: latestDraft
-    });
-  } catch (err) {
-    console.error('[Draft Store] Error:', err);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// GET /api/draft/latest - Fetch latest saved draft
-app.get('/api/draft/latest', (req, res) => {
-  try {
-    res.json({
-      success: true,
-      draft: latestDraft
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// GET /api/problems - Fetch stored problems with optional platform & topic filters
-app.get('/api/problems', (req, res) => {
-  try {
-    const { platform, topic } = req.query;
-    let query = 'SELECT * FROM problems WHERE 1=1';
-    const params = [];
-
-    if (platform && platform !== 'all') {
-      query += ' AND LOWER(platform) = LOWER(?)';
-      params.push(platform);
     }
 
-    if (topic && topic !== 'all') {
-      query += ' AND LOWER(topics) LIKE LOWER(?)';
-      params.push(`%"${topic}"%`);
+    const dateStr = solved_at || new Date().toISOString();
+
+    const { data, error } = await supabase
+      .from('problems')
+      .upsert({
+        platform: String(platform).toLowerCase().trim(),
+        platform_problem_id: String(platform_problem_id).trim(),
+        title: String(title).trim(),
+        url: url || '',
+        difficulty: difficulty || 'Medium',
+        topics: topicsArr,
+        question_statement: question_statement || '',
+        my_solution_code: my_solution_code || '',
+        my_solution_language: my_solution_language || 'C++',
+        solved_at: dateStr,
+        pushed_to_github: false
+      }, { onConflict: 'platform, platform_problem_id' })
+      .select()
+      .single();
+
+    if (error) throw new Error(error.message);
+
+    res.json({
+      success: true,
+      message: `Captured '${title}' successfully!`,
+      problem_id: data ? data.id : null
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// POST /api/draft - Desktop helper clipboard capture
+app.post('/api/draft', async (req, res) => {
+  try {
+    const { platform = 'hive', code = '' } = req.body;
+    const draftPayload = JSON.stringify({
+      platform,
+      code,
+      timestamp: new Date().toISOString()
+    });
+
+    await supabase
+      .from('settings')
+      .upsert({ key: 'latest_draft', value: draftPayload }, { onConflict: 'key' });
+
+    res.json({ success: true, message: 'Draft saved successfully' });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/draft/latest - Fetch latest clipboard draft
+app.get('/api/draft/latest', async (req, res) => {
+  try {
+    const { data: row } = await supabase
+      .from('settings')
+      .select('value')
+      .eq('key', 'latest_draft')
+      .single();
+
+    if (!row || !row.value) {
+      return res.json({ success: false, draft: null });
     }
 
-    query += ' ORDER BY solved_at DESC, id DESC';
-    const problems = db.prepare(query).all(...params);
-    res.json(problems);
+    res.json({ success: true, draft: JSON.parse(row.value) });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// GET /api/problems - Filterable problems list
+app.get('/api/problems', async (req, res) => {
+  try {
+    let query = supabase.from('problems').select('*').order('solved_at', { ascending: false });
+
+    if (req.query.platform && req.query.platform !== 'all') {
+      query = query.eq('platform', req.query.platform.toLowerCase());
+    }
+
+    if (req.query.difficulty && req.query.difficulty !== 'all') {
+      query = query.ilike('difficulty', req.query.difficulty);
+    }
+
+    const { data: problems, error } = await query;
+    if (error) throw new Error(error.message);
+
+    let filtered = problems || [];
+
+    // Filter by topic tag if requested
+    if (req.query.topic && req.query.topic !== 'all') {
+      const targetTopic = req.query.topic.toLowerCase();
+      filtered = filtered.filter(p => {
+        let topicsArr = [];
+        if (Array.isArray(p.topics)) topicsArr = p.topics;
+        else if (typeof p.topics === 'string') {
+          try { topicsArr = JSON.parse(p.topics); } catch (_) {}
+        }
+        return topicsArr.some(t => t.toLowerCase() === targetTopic);
+      });
+    }
+
+    // Filter by search query if requested
+    if (req.query.search) {
+      const q = req.query.search.toLowerCase();
+      filtered = filtered.filter(p => (p.title || '').toLowerCase().includes(q));
+    }
+
+    res.json(filtered);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// GET /api/problems/:id - Fetch problem detail by ID
-app.get('/api/problems/:id', (req, res) => {
+// GET /api/problems/:id - Fetch single problem detail
+app.get('/api/problems/:id', async (req, res) => {
   try {
-    const problem = db.prepare('SELECT * FROM problems WHERE id = ?').get(req.params.id);
-    if (!problem) {
+    const { data: problem, error } = await supabase
+      .from('problems')
+      .select('*')
+      .eq('id', req.params.id)
+      .single();
+
+    if (error || !problem) {
       return res.status(404).json({ error: 'Problem not found' });
     }
+
     res.json(problem);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// 3. Start server on port 4545
-const server = app.listen(PORT, async () => {
-  console.log(`[Server] DSA Tracker running on http://localhost:${PORT}`);
+// POST /api/problems - Manual problem entry
+app.post('/api/problems', async (req, res) => {
   try {
-    await ensureRepoCloned();
+    const {
+      platform,
+      platform_problem_id,
+      title,
+      url,
+      difficulty,
+      topics = [],
+      question_statement,
+      my_solution_code,
+      my_solution_language,
+      solved_at
+    } = req.body;
+
+    if (!platform || !title) {
+      return res.status(400).json({ success: false, error: 'Platform and Title are required fields.' });
+    }
+
+    const probId = (platform_problem_id && String(platform_problem_id).trim())
+      ? String(platform_problem_id).trim()
+      : `manual-${Date.now()}`;
+
+    const topicsArr = Array.isArray(topics) ? topics : [];
+    for (const t of topicsArr) {
+      if (t && typeof t === 'string' && t.trim()) {
+        await supabase.from('topics_master').upsert({ name: t.trim() }, { onConflict: 'name' });
+      }
+    }
+
+    const dateStr = solved_at ? new Date(solved_at).toISOString() : new Date().toISOString();
+
+    const { data: problem, error } = await supabase
+      .from('problems')
+      .upsert({
+        platform: String(platform).toLowerCase().trim(),
+        platform_problem_id: probId,
+        title: String(title).trim(),
+        url: url || '',
+        difficulty: difficulty || 'Medium',
+        topics: topicsArr,
+        question_statement: question_statement || '',
+        my_solution_code: my_solution_code || '',
+        my_solution_language: my_solution_language || 'C++',
+        solved_at: dateStr,
+        pushed_to_github: false
+      }, { onConflict: 'platform, platform_problem_id' })
+      .select()
+      .single();
+
+    if (error) throw new Error(error.message);
+
+    res.json({
+      success: true,
+      message: `Problem '${title}' saved successfully!`,
+      problem_id: problem.id
+    });
   } catch (err) {
-    console.error('[Server] Initial GitHub repo clone check failed:', err.message);
+    res.status(500).json({ success: false, error: err.message });
   }
-  // Initialize node-cron automated background syncs
-  initScheduler();
 });
 
-module.exports = { app, db, server };
+// Only start standalone HTTP server if running directly (not in Vercel serverless environment)
+if (!process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`[Server] DSA Tracker running on http://localhost:${PORT}`);
+    ensureRepoCloned();
+    initScheduler();
+  });
+}
+
+module.exports = app;

@@ -1,4 +1,4 @@
-const db = require('../db/init');
+const supabase = require('../db/init');
 
 /**
  * Calculates summary statistics:
@@ -6,23 +6,40 @@ const db = require('../db/init');
  * - currentStreak: Consecutive days with at least 1 solve leading up to today/yesterday
  * - longestStreak: Max consecutive days with at least 1 solve historically
  */
-function getSummaryStats() {
-  const totalRow = db.prepare('SELECT COUNT(*) as count FROM problems').get();
-  const totalSolved = totalRow ? totalRow.count : 0;
+async function getSummaryStats() {
+  const { count: totalSolved, error: countErr } = await supabase
+    .from('problems')
+    .select('*', { count: 'exact', head: true });
 
-  // Get distinct solved dates sorted descending
-  const dateRows = db.prepare(`
-    SELECT DISTINCT DATE(solved_at) as solve_date 
-    FROM problems 
-    WHERE solved_at IS NOT NULL 
-    ORDER BY solve_date DESC
-  `).all();
-
-  if (dateRows.length === 0) {
-    return { totalSolved: 0, currentStreak: 0, longestStreak: 0 };
+  if (countErr) {
+    console.error('[Stats Service] Count error:', countErr.message);
   }
 
-  const dates = dateRows.map(r => r.solve_date);
+  // Fetch distinct solved_at timestamps sorted descending
+  const { data: probRows, error: datesErr } = await supabase
+    .from('problems')
+    .select('solved_at')
+    .not('solved_at', 'is', null)
+    .order('solved_at', { ascending: false });
+
+  if (datesErr || !probRows || probRows.length === 0) {
+    return { totalSolved: totalSolved || 0, currentStreak: 0, longestStreak: 0 };
+  }
+
+  // Extract distinct YYYY-MM-DD date strings
+  const dateSet = new Set();
+  probRows.forEach(r => {
+    if (r.solved_at) {
+      const dateStr = new Date(r.solved_at).toISOString().split('T')[0];
+      dateSet.add(dateStr);
+    }
+  });
+
+  const dates = Array.from(dateSet).sort().reverse();
+
+  if (dates.length === 0) {
+    return { totalSolved: totalSolved || 0, currentStreak: 0, longestStreak: 0 };
+  }
 
   // Helper to parse YYYY-MM-DD into midnight UTC timestamp
   function parseDate(dateStr) {
@@ -78,7 +95,7 @@ function getSummaryStats() {
   }
 
   return {
-    totalSolved,
+    totalSolved: totalSolved || 0,
     currentStreak,
     longestStreak
   };
@@ -87,19 +104,26 @@ function getSummaryStats() {
 /**
  * Returns solve counts per date for the last 365 days.
  */
-function getHeatmapData() {
-  const rows = db.prepare(`
-    SELECT DATE(solved_at) as date, COUNT(*) as count 
-    FROM problems 
-    WHERE solved_at IS NOT NULL 
-      AND solved_at >= DATE('now', '-365 days')
-    GROUP BY DATE(solved_at)
-    ORDER BY date ASC
-  `).all();
+async function getHeatmapData() {
+  const oneYearAgo = new Date(Date.now() - 365 * 86400000).toISOString();
+
+  const { data: rows, error } = await supabase
+    .from('problems')
+    .select('solved_at')
+    .not('solved_at', 'is', null)
+    .gte('solved_at', oneYearAgo);
+
+  if (error || !rows) {
+    console.error('[Stats Service] Heatmap error:', error?.message);
+    return {};
+  }
 
   const heatmapMap = {};
   rows.forEach(r => {
-    heatmapMap[r.date] = r.count;
+    if (r.solved_at) {
+      const dateStr = new Date(r.solved_at).toISOString().split('T')[0];
+      heatmapMap[dateStr] = (heatmapMap[dateStr] || 0) + 1;
+    }
   });
 
   return heatmapMap;
@@ -107,33 +131,48 @@ function getHeatmapData() {
 
 /**
  * Returns topic counts for all topics in topics_master.
- * Matches against topics JSON array strings stored on problems.
+ * Native Postgres JSONB array handling on problems.
  */
-function getTopicStats() {
-  const masterTopics = db.prepare('SELECT name FROM topics_master ORDER BY name ASC').all();
-  const problems = db.prepare('SELECT topics FROM problems WHERE topics IS NOT NULL').all();
+async function getTopicStats() {
+  const { data: masterTopics, error: masterErr } = await supabase
+    .from('topics_master')
+    .select('name')
+    .order('name', { ascending: true });
 
+  const { data: problems, error: probErr } = await supabase
+    .from('problems')
+    .select('topics')
+    .not('topics', 'is', null);
+
+  if (masterErr || probErr) {
+    console.error('[Stats Service] Topics fetch error:', masterErr?.message || probErr?.message);
+  }
+
+  const masterList = masterTopics || [];
   const topicCountMap = {};
-  masterTopics.forEach(t => {
+
+  masterList.forEach(t => {
     topicCountMap[t.name] = 0;
   });
 
-  problems.forEach(p => {
-    try {
-      const topicsArr = JSON.parse(p.topics);
-      if (Array.isArray(topicsArr)) {
-        topicsArr.forEach(topic => {
-          // Normalize matching case-insensitively or exact
-          const match = masterTopics.find(mt => mt.name.toLowerCase() === topic.toLowerCase());
-          if (match) {
-            topicCountMap[match.name] = (topicCountMap[match.name] || 0) + 1;
-          } else {
-            // Unlisted topic dynamically added
-            topicCountMap[topic] = (topicCountMap[topic] || 0) + 1;
-          }
-        });
-      }
-    } catch (_) {}
+  (problems || []).forEach(p => {
+    let topicsArr = [];
+    if (Array.isArray(p.topics)) {
+      topicsArr = p.topics;
+    } else if (typeof p.topics === 'string') {
+      try { topicsArr = JSON.parse(p.topics); } catch (_) {}
+    }
+
+    if (Array.isArray(topicsArr)) {
+      topicsArr.forEach(topic => {
+        const match = masterList.find(mt => mt.name.toLowerCase() === topic.toLowerCase());
+        if (match) {
+          topicCountMap[match.name] = (topicCountMap[match.name] || 0) + 1;
+        } else {
+          topicCountMap[topic] = (topicCountMap[topic] || 0) + 1;
+        }
+      });
+    }
   });
 
   const result = Object.keys(topicCountMap).map(topic => ({
@@ -150,8 +189,8 @@ function getTopicStats() {
  * Returns weak/untouched topics sorted ascending by solve count (0 solves first).
  * Generates LeetCode topic tag slugs for direct practice links.
  */
-function getWeakTopics(limit = 5) {
-  const allTopicStats = getTopicStats();
+async function getWeakTopics(limit = 5) {
+  const allTopicStats = await getTopicStats();
   
   // Sort ascending by solve count, then alphabetically
   const sortedAsc = [...allTopicStats].sort((a, b) => a.count - b.count || a.topic.localeCompare(b.topic));
