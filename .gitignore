@@ -7,3 +7,4 @@ server/data/
 scratch/
 .DS_Store
 
+.vercel
