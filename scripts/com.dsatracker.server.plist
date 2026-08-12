@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.dsatracker.server</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/chinnurohit/.nvm/versions/node/v22.20.0/bin/node</string>
+        <string>/Users/chinnurohit/Desktop/dsa-tracker/server/index.js</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/chinnurohit/Desktop/dsa-tracker</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/Users/chinnurohit/.nvm/versions/node/v22.20.0/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>PORT</key>
+        <string>4545</string>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/chinnurohit/Desktop/dsa-tracker/server/data/server.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/chinnurohit/Desktop/dsa-tracker/server/data/server_error.log</string>
+</dict>
+</plist>

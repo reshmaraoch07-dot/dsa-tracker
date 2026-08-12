@@ -1,0 +1,32 @@
+{
+  "name": "dsa-tracker",
+  "version": "1.0.0",
+  "description": "Local coding-practice tracker app",
+  "main": "server/index.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "nodemon server/index.js"
+  },
+  "keywords": [
+    "dsa",
+    "leetcode",
+    "tracker"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.116.0",
+    "@google/generative-ai": "^0.24.1",
+    "better-sqlite3": "^11.8.1",
+    "cheerio": "^1.2.0",
+    "cors": "^2.8.6",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "node-cron": "^4.6.0",
+    "simple-git": "^3.36.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
+  }
+}

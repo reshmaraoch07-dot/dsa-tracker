@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Settings | DSA Tracker</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-container">
+    <header class="app-header">
+      <div class="brand">
+        <div class="logo">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="16 18 22 12 16 6"></polyline>
+            <polyline points="8 6 2 12 8 18"></polyline>
+          </svg>
+        </div>
+        <div>
+          <h1>DSA Tracker</h1>
+          <p class="subtitle">Platform Configuration & Settings</p>
+        </div>
+      </div>
+      <nav class="nav-links">
+        <a href="index.html" class="nav-link">Dashboard</a>
+        <a href="settings.html" class="nav-link active">Settings</a>
+      </nav>
+    </header>
+
+    <main class="dashboard-content">
+      <div class="settings-card">
+        <h2>Platform Integration Settings</h2>
+        <p class="settings-desc">Configure your competitive programming handles to sync accepted solutions.</p>
+        
+        <form id="settings-form" class="settings-form">
+          <div class="form-group">
+            <label for="codeforces-handle">Codeforces Handle</label>
+            <input 
+              type="text" 
+              id="codeforces-handle" 
+              name="codeforces_handle" 
+              placeholder="e.g. tourist"
+              autocomplete="off"
+              required 
+            />
+            <span class="field-help">Your public Codeforces username used for fetching accepted submissions.</span>
+          </div>
+
+          <div class="form-actions">
+            <button type="submit" class="btn btn-primary" id="save-btn">
+              <span>Save Settings</span>
+            </button>
+          </div>
+        </form>
+
+        <div id="settings-status" class="status-msg hidden"></div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', async () => {
+      const handleInput = document.getElementById('codeforces-handle');
+      const form = document.getElementById('settings-form');
+      const statusMsg = document.getElementById('settings-status');
+
+      // Fetch saved settings on page load
+      try {
+        const res = await fetch('/api/settings');
+        if (res.ok) {
+          const settings = await res.json();
+          if (settings.codeforces_handle) {
+            handleInput.value = settings.codeforces_handle;
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load settings:', err);
+      }
+
+      // Handle form submit
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const handleValue = handleInput.value.trim();
+
+        statusMsg.className = 'status-msg info';
+        statusMsg.textContent = 'Saving...';
+        statusMsg.classList.remove('hidden');
+
+        try {
+          const res = await fetch('/api/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key: 'codeforces_handle', value: handleValue })
+          });
+
+          const data = await res.json();
+          if (data.success) {
+            statusMsg.className = 'status-msg success';
+            statusMsg.textContent = 'Codeforces handle saved successfully!';
+          } else {
+            throw new Error(data.error || 'Failed to save settings');
+          }
+        } catch (err) {
+          statusMsg.className = 'status-msg error';
+          statusMsg.textContent = err.message;
+        }
+      });
+    });
+  </script>
+</body>
+</html>

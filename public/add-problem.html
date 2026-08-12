@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Add Problem Manually | DSA Tracker</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <div class="app-container">
+    <header class="app-header">
+      <div class="brand">
+        <div class="logo">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+          </svg>
+        </div>
+        <div>
+          <h1>DSA Tracker</h1>
+          <p class="subtitle">Manual Problem Entry</p>
+        </div>
+      </div>
+      <nav class="nav-links">
+        <a href="index.html" class="nav-link">← Back to Dashboard</a>
+        <a href="settings.html" class="nav-link">Settings</a>
+      </nav>
+    </header>
+
+    <main class="dashboard-content">
+      <div class="dashboard-card">
+        <div class="card-header">
+          <h2>Add Problem Record</h2>
+          <p class="card-desc">Manually record problems solved outside auto-capture platforms.</p>
+        </div>
+
+        <form id="add-problem-form" class="settings-form" style="display: flex; flex-direction: column; gap: 1.25rem; max-width: 800px;">
+          <!-- 1. Platform & Difficulty Row -->
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem;">
+            <div class="form-group">
+              <label for="platform">Platform</label>
+              <select id="platform" class="form-input" required>
+                <option value="leetcode">LeetCode</option>
+                <option value="codeforces">Codeforces</option>
+                <option value="codechef">CodeChef</option>
+                <option value="hive">Hive</option>
+                <option value="other" selected>Other</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="difficulty">Difficulty</label>
+              <select id="difficulty" class="form-input" required>
+                <option value="Easy">Easy</option>
+                <option value="Medium" selected>Medium</option>
+                <option value="Hard">Hard</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- 2. Problem Title -->
+          <div class="form-group">
+            <label for="title">Problem Title *</label>
+            <input type="text" id="title" class="form-input" placeholder="e.g. LRU Cache / Course Schedule" required>
+          </div>
+
+          <!-- 3. Original Problem URL -->
+          <div class="form-group">
+            <label for="url">Original Problem URL</label>
+            <input type="url" id="url" class="form-input" placeholder="https://leetcode.com/problems/lru-cache/">
+          </div>
+
+          <!-- 4. Topic Tags Selection -->
+          <div class="form-group">
+            <label>Topics / Tags</label>
+            <p class="help-text" style="font-size: 0.8rem; color: #94a3b8; margin-bottom: 0.5rem;">Click topics to select or add a new custom topic below.</p>
+            <div id="topics-picker-container" class="topics-container" style="gap: 0.5rem; margin-bottom: 0.75rem; flex-wrap: wrap;">
+              <!-- Topic pills dynamically rendered here -->
+            </div>
+
+            <div style="display: flex; gap: 0.5rem; max-width: 400px;">
+              <input type="text" id="custom-topic-input" class="form-input" placeholder="Add custom topic...">
+              <button type="button" id="add-topic-btn" class="btn btn-sync" style="white-space: nowrap;">+ Add</button>
+            </div>
+          </div>
+
+          <!-- 5. Question Statement -->
+          <div class="form-group">
+            <label for="question-statement">Question Statement</label>
+            <textarea id="question-statement" class="form-input" rows="5" placeholder="Paste the problem description or statement details here..."></textarea>
+          </div>
+
+          <!-- 6. Solution Code -->
+          <div class="form-group">
+            <label for="solution-code">My Solution Code *</label>
+            <textarea id="solution-code" class="form-input" rows="10" style="font-family: 'JetBrains Mono', monospace; font-size: 0.88rem;" placeholder="// Paste your solution code here..." required></textarea>
+          </div>
+
+          <!-- 7. Language & Solved Date Row -->
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem;">
+            <div class="form-group">
+              <label for="language">Programming Language</label>
+              <select id="language" class="form-input" required>
+                <option value="C++" selected>C++</option>
+                <option value="Java">Java</option>
+                <option value="Python">Python</option>
+                <option value="JavaScript">JavaScript</option>
+                <option value="C">C</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label for="solved-at">Date Solved</label>
+              <input type="date" id="solved-at" class="form-input" required>
+            </div>
+          </div>
+
+          <!-- Form Buttons -->
+          <div style="display: flex; gap: 1rem; margin-top: 1rem;">
+            <button type="submit" id="save-btn" class="btn btn-primary" style="flex: 1; justify-content: center; padding: 0.85rem;">
+              <span class="spinner hidden" id="save-spinner"></span>
+              <span id="save-btn-text">Save Problem to Tracker</span>
+            </button>
+            <a href="index.html" class="btn btn-sync" style="text-decoration: none; padding: 0.85rem 1.5rem;">Cancel</a>
+          </div>
+        </form>
+      </div>
+    </main>
+  </div>
+
+  <script src="add-problem.js"></script>
+</body>
+</html>

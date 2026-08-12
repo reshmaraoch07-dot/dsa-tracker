@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DSA Tracker Helper</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #1e293b;
+      --border: rgba(255,255,255,0.1);
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --green: #34d399;
+      --red: #f87171;
+      --blue: #38bdf8;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      width: 280px;
+      padding: 1.25rem;
+    }
+
+    .popup-header {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 1rem;
+    }
+
+    .logo-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, var(--blue), #818cf8);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      font-weight: 700;
+      font-size: 14px;
+    }
+
+    h2 { font-size: 1rem; font-weight: 700; }
+    p { font-size: 0.75rem; color: var(--muted); }
+
+    .status-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.85rem;
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      margin-bottom: 1rem;
+      font-size: 0.82rem;
+    }
+
+    .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: var(--muted);
+      transition: background 0.3s;
+    }
+
+    .dot.online { background: var(--green); box-shadow: 0 0 8px var(--green); }
+    .dot.offline { background: var(--red); box-shadow: 0 0 8px var(--red); }
+
+    .btn {
+      width: 100%;
+      padding: 0.65rem;
+      background: linear-gradient(135deg, var(--blue), #818cf8);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-weight: 600;
+      font-size: 0.85rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.4rem;
+      transition: opacity 0.2s;
+    }
+
+    .btn:hover { opacity: 0.9; }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    #feedback {
+      margin-top: 0.75rem;
+      font-size: 0.78rem;
+      text-align: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="popup-header">
+    <div class="logo-icon">DSA</div>
+    <div>
+      <h2>DSA Tracker</h2>
+      <p>Auto-Capture Extension</p>
+    </div>
+  </div>
+
+  <div class="status-card">
+    <div id="status-dot" class="dot"></div>
+    <span id="status-text">Connecting to server...</span>
+  </div>
+
+  <button id="capture-btn" class="btn">
+    <span>📷 Capture Current Page</span>
+  </button>
+
+  <div id="feedback"></div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

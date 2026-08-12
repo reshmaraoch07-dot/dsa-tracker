@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Problem Detail | DSA Tracker</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <div class="app-container">
+    <header class="app-header">
+      <div class="brand">
+        <div class="logo">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="16 18 22 12 16 6"></polyline>
+            <polyline points="8 6 2 12 8 18"></polyline>
+          </svg>
+        </div>
+        <div>
+          <h1>DSA Tracker</h1>
+          <p class="subtitle">Problem Detail View</p>
+        </div>
+      </div>
+      <nav class="nav-links">
+        <a href="index.html" class="nav-link">← Back to Dashboard</a>
+        <a href="settings.html" class="nav-link">Settings</a>
+      </nav>
+    </header>
+
+    <main class="dashboard-content">
+      <div id="loading-state" class="welcome-card">
+        <p>Loading problem details...</p>
+      </div>
+
+      <div id="detail-card" class="problem-detail-card hidden">
+        <div class="detail-header">
+          <div>
+            <div class="detail-badges" id="detail-badges"></div>
+            <h2 id="detail-title" class="detail-title"></h2>
+            <div class="detail-meta" id="detail-meta"></div>
+          </div>
+          <div>
+            <a id="external-link" href="#" target="_blank" rel="noopener" class="btn btn-sync">
+              <span>View Original Problem ↗</span>
+            </a>
+          </div>
+        </div>
+
+        <!-- Topics List -->
+        <div class="detail-section">
+          <div class="code-header" style="margin-bottom: 0.5rem;">
+            <h3 style="margin-bottom: 0;">Topics</h3>
+            <button id="auto-tag-btn" class="btn btn-sync" style="font-size: 0.8rem; padding: 0.35rem 0.75rem;">
+              <span class="spinner hidden" id="auto-tag-spinner"></span>
+              <span id="auto-tag-text">🏷️ Auto-Tag Topics & Difficulty (AI)</span>
+            </button>
+          </div>
+          <div id="detail-topics" class="topics-container"></div>
+        </div>
+
+        <!-- Question Statement -->
+        <div class="detail-section">
+          <h3>Question Statement</h3>
+          <div id="question-statement" class="question-body"></div>
+        </div>
+
+        <!-- My Solution -->
+        <div class="detail-section">
+          <div class="code-header">
+            <h3>My Solution</h3>
+            <span id="solution-lang" class="lang-badge"></span>
+          </div>
+          <pre class="code-block"><code id="solution-code"></code></pre>
+        </div>
+
+        <!-- Optimal Solution & AI Generator -->
+        <div class="detail-section">
+          <div class="code-header">
+            <h3>Optimal Solution (AI Generated)</h3>
+            <button id="generate-ai-btn" class="btn btn-primary">
+              <span class="spinner hidden" id="ai-spinner"></span>
+              <span id="ai-btn-text">✨ Generate Optimal Solution (AI)</span>
+            </button>
+          </div>
+          
+          <div id="optimal-solution-container">
+            <pre class="code-block"><code id="optimal-solution-code"></code></pre>
+            <div id="optimal-solution-explanation" class="question-body" style="margin-top: 1rem;"></div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', async () => {
+      const urlParams = new URLSearchParams(window.location.search);
+      const problemId = urlParams.get('id');
+
+      const loadingState = document.getElementById('loading-state');
+      const detailCard = document.getElementById('detail-card');
+
+      const generateAiBtn = document.getElementById('generate-ai-btn');
+      const aiSpinner = document.getElementById('ai-spinner');
+      const aiBtnText = document.getElementById('ai-btn-text');
+      const toastContainer = document.getElementById('toast-container');
+
+      function showToast(message, type = 'success', duration = 4000) {
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        const icon = type === 'success' ? '✓' : type === 'error' ? '✕' : 'ℹ';
+        toast.innerHTML = `<span><strong>${icon}</strong> ${message}</span>`;
+        toastContainer.appendChild(toast);
+        setTimeout(() => {
+          toast.style.opacity = '0';
+          toast.style.transform = 'translateX(100%)';
+          setTimeout(() => toast.remove(), 300);
+        }, duration);
+      }
+
+      async function loadProblemDetail() {
+        if (!problemId) {
+          loadingState.innerHTML = '<p class="status-msg error">No problem ID specified in URL.</p>';
+          return;
+        }
+
+        try {
+          const res = await fetch(`/api/problems/${problemId}`);
+          if (!res.ok) throw new Error('Problem not found');
+          
+          const prob = await res.json();
+          loadingState.classList.add('hidden');
+          detailCard.classList.remove('hidden');
+
+          document.getElementById('detail-title').textContent = prob.title;
+          document.getElementById('external-link').href = prob.url || '#';
+
+          // Badges
+          const badgesContainer = document.getElementById('detail-badges');
+          const platformClass = (prob.platform || '').toLowerCase();
+          const diffClass = (prob.difficulty || 'easy').toLowerCase();
+          
+          badgesContainer.innerHTML = `
+            <span class="platform-badge ${platformClass}">${prob.platform}</span>
+            <span class="diff-badge ${diffClass}">${prob.difficulty || 'N/A'}</span>
+            <span class="github-badge ${prob.pushed_to_github ? 'pushed' : 'pending'}">
+              ${prob.pushed_to_github ? '✓ Pushed to GitHub' : '⏳ GitHub Pending'}
+            </span>
+          `;
+
+          // Meta info
+          const dateStr = prob.solved_at ? new Date(prob.solved_at).toLocaleDateString(undefined, {
+            year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+          }) : 'N/A';
+
+          document.getElementById('detail-meta').innerHTML = `
+            <span>Solved on: <strong>${dateStr}</strong></span>
+            ${prob.github_file_path ? ` &bull; <span>Repo Path: <code>${prob.github_file_path}</code></span>` : ''}
+          `;
+
+          // Topics
+          let topics = [];
+          try { topics = JSON.parse(prob.topics || '[]'); } catch (_) {}
+          const topicsContainer = document.getElementById('detail-topics');
+          if (topics.length > 0) {
+            topicsContainer.innerHTML = topics.map(t => `<span class="topic-pill">${t}</span>`).join(' ');
+          } else {
+            topicsContainer.innerHTML = '<span class="text-muted">No topics listed</span>';
+          }
+
+          // Question Statement
+          document.getElementById('question-statement').textContent = 
+            prob.question_statement || 'Refer to the original problem link above for full statement details.';
+
+          // My Solution Code
+          document.getElementById('solution-lang').textContent = prob.my_solution_language || 'Code';
+          document.getElementById('solution-code').textContent = 
+            prob.my_solution_code || '// No solution code recorded';
+
+          // Optimal Solution Code & Explanation
+          document.getElementById('optimal-solution-code').textContent = 
+            prob.optimal_solution_code || '// Optimal solution code not generated yet.';
+
+          document.getElementById('optimal-solution-explanation').textContent = 
+            prob.optimal_solution_explanation || 'Click "Generate Optimal Solution (AI)" to create a Claude-powered optimal solution and complexity analysis.';
+
+        } catch (err) {
+          loadingState.innerHTML = `<p class="status-msg error">${err.message}</p>`;
+        }
+      }
+
+      loadProblemDetail();
+
+      // AI Generator Click Handler
+      if (generateAiBtn) {
+        generateAiBtn.addEventListener('click', async () => {
+          generateAiBtn.disabled = true;
+          aiSpinner.classList.remove('hidden');
+          aiBtnText.textContent = 'Generating with Claude...';
+
+          try {
+            const res = await fetch(`/api/problems/${problemId}/generate-optimal`, { method: 'POST' });
+            const data = await res.json();
+
+            if (data.success) {
+              showToast('Optimal solution generated successfully!', 'success');
+              await loadProblemDetail();
+            } else {
+              showToast(`Generation Error: ${data.error}`, 'error', 6000);
+            }
+          } catch (err) {
+            showToast(`Request Failed: ${err.message}`, 'error', 6000);
+          } finally {
+            generateAiBtn.disabled = false;
+            aiSpinner.classList.add('hidden');
+            aiBtnText.textContent = '✨ Regenerate Optimal Solution (AI)';
+          }
+        });
+      }
+
+      // Auto-Tag Click Handler
+      const autoTagBtn = document.getElementById('auto-tag-btn');
+      const autoTagSpinner = document.getElementById('auto-tag-spinner');
+      const autoTagText = document.getElementById('auto-tag-text');
+
+      if (autoTagBtn) {
+        autoTagBtn.addEventListener('click', async () => {
+          autoTagBtn.disabled = true;
+          autoTagSpinner.classList.remove('hidden');
+          autoTagText.textContent = 'Categorizing with Gemini...';
+
+          try {
+            const res = await fetch(`/api/problems/${problemId}/auto-tag`, { method: 'POST' });
+            const data = await res.json();
+
+            if (data.success) {
+              showToast(`Auto-tagged -> [${(data.topics || []).join(', ')}] (${data.difficulty})`, 'success');
+              await loadProblemDetail();
+            } else {
+              showToast(`Auto-Tag Error: ${data.error}`, 'error', 6000);
+            }
+          } catch (err) {
+            showToast(`Request Failed: ${err.message}`, 'error', 6000);
+          } finally {
+            autoTagBtn.disabled = false;
+            autoTagSpinner.classList.add('hidden');
+            autoTagText.textContent = '🏷️ Auto-Tag Topics & Difficulty (AI)';
+          }
+        });
+      }
+    });
+  </script>
+</body>
+</html>

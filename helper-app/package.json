@@ -1,0 +1,12 @@
+{
+  "name": "dsa-tracker-helper",
+  "version": "1.0.0",
+  "description": "Electron desktop helper app for DSA Tracker clipboard draft capture",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "electron": "^31.0.0"
+  }
+}

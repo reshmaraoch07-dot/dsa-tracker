@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="DSA Tracker - Local coding practice & revision tracker with GitHub sync">
+  <title>DSA Tracker | Practice Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Toast Notification Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <div class="app-container">
+    <!-- Main Header -->
+    <header class="app-header">
+      <div class="brand">
+        <div class="logo">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polyline points="16 18 22 12 16 6"></polyline>
+            <polyline points="8 6 2 12 8 18"></polyline>
+          </svg>
+        </div>
+        <div>
+          <h1>DSA Tracker</h1>
+          <p class="subtitle">Personal Coding Practice & Revision Dashboard</p>
+        </div>
+      </div>
+      <div class="header-right">
+        <nav class="nav-links">
+          <a href="index.html" class="nav-link active">Dashboard</a>
+          <a href="settings.html" class="nav-link">Settings</a>
+        </nav>
+        <div class="server-status">
+          <span class="status-indicator" id="status-indicator"></span>
+          <span class="status-text" id="status-text">Checking...</span>
+        </div>
+      </div>
+    </header>
+
+    <main class="dashboard-content">
+      <!-- 1. Stats Cards & Action Toolbar -->
+      <section class="stats-overview-grid">
+        <div class="stat-card">
+          <div class="stat-icon blue">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+              <polyline points="22 4 12 14.01 9 11.01"></polyline>
+            </svg>
+          </div>
+          <div class="stat-details">
+            <span class="stat-label">Total Solved</span>
+            <span class="stat-value" id="stat-total-solved">0</span>
+          </div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-icon orange">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"></path>
+            </svg>
+          </div>
+          <div class="stat-details">
+            <span class="stat-label">Current Streak</span>
+            <span class="stat-value" id="stat-current-streak">0 days</span>
+          </div>
+        </div>
+
+        <div class="stat-card">
+          <div class="stat-icon purple">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="8" r="7"></circle>
+              <polyline points="8.21 13.89 7 23 12 20 17 23 15.79 13.88"></polyline>
+            </svg>
+          </div>
+          <div class="stat-details">
+            <span class="stat-label">Longest Streak</span>
+            <span class="stat-value" id="stat-longest-streak">0 days</span>
+          </div>
+        </div>
+
+        <div class="action-card">
+          <a href="add-problem.html" class="btn btn-add full-width" style="text-decoration: none; justify-content: center; background: linear-gradient(135deg, #10b981, #059669); color: white;">
+            <svg class="btn-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+            <span class="btn-text">Add Problem Manually</span>
+          </a>
+
+          <button id="sync-cf-btn" class="btn btn-sync full-width">
+            <span class="spinner hidden" id="sync-cf-spinner"></span>
+            <svg class="btn-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21.5 2v6h-6M2.5 22v-6h6"></path>
+              <path d="M2 11.5a10 10 0 0 1 18.8-4.3L21.5 8M22 12.5a10 10 0 0 1-18.8 4.2L2.5 16"></path>
+            </svg>
+            <span class="btn-text">Sync Codeforces</span>
+          </button>
+
+          <button id="push-github-btn" class="btn btn-primary full-width">
+            <span class="spinner hidden" id="push-github-spinner"></span>
+            <svg class="btn-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.87a3.37 3.37 0 0 0-.94-2.61c3.14-.35 6.44-1.54 6.44-7A5.44 5.44 0 0 0 20 4.77 5.07 5.07 0 0 0 19.91 1S18.73.65 16 2.48a13.38 13.38 0 0 0-7 0C6.27.65 5.09 1 5.09 1A5.07 5.07 0 0 0 5 4.77a5.44 5.44 0 0 0-1.5 3.78c0 5.42 3.3 6.61 6.44 7A3.37 3.37 0 0 0 9 18.13V22"></path>
+            </svg>
+            <span class="btn-text">Push All to GitHub</span>
+          </button>
+
+          <button id="auto-tag-all-btn" class="btn btn-sync full-width">
+            <span class="spinner hidden" id="auto-tag-all-spinner"></span>
+            <span class="btn-text" id="auto-tag-all-text">🏷️ Auto-Tag All Missing (AI)</span>
+          </button>
+
+          <!-- Export & Restore Backup Controls -->
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-top: 0.25rem;">
+            <button id="export-json-btn" class="btn btn-sync" style="font-size: 0.78rem; padding: 0.45rem; justify-content: center;" title="Download JSON Backup">
+              <span>📥 JSON</span>
+            </button>
+            <button id="export-csv-btn" class="btn btn-sync" style="font-size: 0.78rem; padding: 0.45rem; justify-content: center;" title="Download Excel/CSV Backup">
+              <span>📊 CSV</span>
+            </button>
+          </div>
+
+          <button id="restore-backup-btn" class="btn btn-sync full-width" style="font-size: 0.78rem; margin-top: 0.25rem; justify-content: center;">
+            <span>🔄 Restore from Backup</span>
+          </button>
+          <input type="file" id="import-file-input" accept=".json" style="display: none;">
+        </div>
+      </section>
+
+      <!-- Automation Status Card -->
+      <section class="dashboard-card" style="margin-bottom: 1.5rem; padding: 1.25rem;">
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;">
+          <div style="display: flex; align-items: center; gap: 0.75rem;">
+            <div style="width: 36px; height: 36px; border-radius: 8px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; display: flex; align-items: center; justify-content: center;">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="12" cy="12" r="10"></circle>
+                <polyline points="12 6 12 12 16 14"></polyline>
+              </svg>
+            </div>
+            <div>
+              <h3 style="font-size: 0.95rem; font-weight: 700; color: #f8fafc; margin-bottom: 0.2rem;">Automation Status</h3>
+              <p style="font-size: 0.78rem; color: #94a3b8;">Background node-cron jobs (Codeforces: 4h, GitHub: 6h)</p>
+            </div>
+          </div>
+
+          <div style="display: flex; gap: 1.5rem; flex-wrap: wrap;">
+            <div style="font-size: 0.82rem;">
+              <span style="color: #94a3b8;">Last Codeforces Sync:</span>
+              <strong id="auto-cf-time" style="color: #cbd5e1; margin-left: 0.3rem;">Loading...</strong>
+              <span id="auto-cf-status" class="topic-pill" style="margin-left: 0.4rem; padding: 2px 8px; font-size: 0.72rem;">Pending</span>
+            </div>
+
+            <div style="font-size: 0.82rem;">
+              <span style="color: #94a3b8;">Last GitHub Push:</span>
+              <strong id="auto-github-time" style="color: #cbd5e1; margin-left: 0.3rem;">Loading...</strong>
+              <span id="auto-github-status" class="topic-pill" style="margin-left: 0.4rem; padding: 2px 8px; font-size: 0.72rem;">Pending</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2. GitHub-style Contribution Heatmap -->
+      <section class="dashboard-card">
+        <div class="card-header">
+          <div>
+            <h2>Practice Consistency (Last 12 Months)</h2>
+            <p class="card-desc">Daily problem solving activity across all platforms.</p>
+          </div>
+          <div class="heatmap-legend">
+            <span class="legend-text">Less</span>
+            <span class="heatmap-cell lvl-0"></span>
+            <span class="heatmap-cell lvl-1"></span>
+            <span class="heatmap-cell lvl-2"></span>
+            <span class="heatmap-cell lvl-3"></span>
+            <span class="heatmap-cell lvl-4"></span>
+            <span class="legend-text">More</span>
+          </div>
+        </div>
+
+        <div class="heatmap-wrapper">
+          <div id="heatmap-months" class="heatmap-months-labels"></div>
+          <div class="heatmap-body">
+            <div class="heatmap-days-labels">
+              <span>Mon</span>
+              <span>Wed</span>
+              <span>Fri</span>
+            </div>
+            <div id="heatmap-grid" class="heatmap-grid"></div>
+          </div>
+        </div>
+        <!-- Tooltip element -->
+        <div id="heatmap-tooltip" class="heatmap-tooltip hidden"></div>
+      </section>
+
+      <!-- Focus Areas (What to Practice Next) -->
+      <section class="dashboard-card" style="border-left: 4px solid #f59e0b;">
+        <div class="card-header flex-between">
+          <div>
+            <h2 style="display: flex; align-items: center; gap: 0.5rem;">
+              <span>🎯 Focus Areas (What to Practice Next)</span>
+            </h2>
+            <p class="card-desc">Top 5 weakest or untouched topics. Click any topic to practice directly on LeetCode.</p>
+          </div>
+          <span style="font-size: 0.78rem; color: #fbbf24; background: rgba(245, 158, 11, 0.15); padding: 4px 10px; border-radius: 20px; font-weight: 600;">
+            Recommended Focus
+          </span>
+        </div>
+        <div id="focus-topics-list" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.85rem; margin-top: 0.75rem;">
+          <!-- Weak topics dynamically rendered here -->
+        </div>
+      </section>
+
+      <!-- 3. Topic Coverage Breakdown -->
+      <section class="dashboard-card">
+        <div class="card-header">
+          <div>
+            <h2>Topic Coverage Breakdown</h2>
+            <p class="card-desc">DSA topic distribution & master progress.</p>
+          </div>
+        </div>
+        <div id="topic-coverage-list" class="topic-coverage-grid"></div>
+      </section>
+
+      <!-- 4. Recent Activity & Filter Bar -->
+      <section class="dashboard-card">
+        <div class="card-header flex-between">
+          <div>
+            <h2>Recent Activity</h2>
+            <p class="card-desc">Latest solved problems and GitHub sync status.</p>
+          </div>
+
+          <!-- Filter Controls -->
+          <div class="filter-controls">
+            <div class="filter-group">
+              <label for="filter-platform">Platform:</label>
+              <select id="filter-platform" class="filter-select">
+                <option value="all">All Platforms</option>
+                <option value="leetcode">LeetCode</option>
+                <option value="codeforces">Codeforces</option>
+                <option value="codechef">CodeChef</option>
+                <option value="hive">Hive</option>
+              </select>
+            </div>
+
+            <div class="filter-group">
+              <label for="filter-topic">Topic:</label>
+              <select id="filter-topic" class="filter-select">
+                <option value="all">All Topics</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <div class="table-wrapper">
+          <table class="activity-table">
+            <thead>
+              <tr>
+                <th>Date</th>
+                <th>Platform</th>
+                <th>Title</th>
+                <th>Difficulty</th>
+                <th>Topics</th>
+                <th>GitHub Sync</th>
+              </tr>
+            </thead>
+            <tbody id="activity-table-body">
+              <tr>
+                <td colspan="6" class="text-center">Loading recent problems...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="dashboard.js"></script>
+</body>
+</html>
