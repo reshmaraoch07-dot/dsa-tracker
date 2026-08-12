@@ -1,17 +1,16 @@
 const cron = require('node-cron');
-const db = require('../db/init');
+const supabase = require('../db/init');
 const { syncCodeforces } = require('./codeforces');
 const { pushAllUnpushedProblems } = require('./github');
 
 /**
  * Helper to log scheduled task execution results into sync_log.
  */
-function logSync(platform, action, status, message) {
+async function logSync(platform, action, status, message) {
   try {
-    db.prepare(`
-      INSERT INTO sync_log (platform, action, status, message)
-      VALUES (?, ?, ?, ?)
-    `).run(platform, action, status, message);
+    await supabase
+      .from('sync_log')
+      .insert({ platform, action, status, message });
   } catch (err) {
     console.error('[Scheduler] Failed to write to sync_log:', err.message);
   }
@@ -21,6 +20,11 @@ function logSync(platform, action, status, message) {
  * Initializes automated background cron jobs.
  */
 function initScheduler() {
+  if (process.env.VERCEL) {
+    console.log('[Scheduler] Running in Vercel serverless environment; skipping background cron initialization.');
+    return;
+  }
+
   console.log('[Scheduler] Initializing automated background sync schedules...');
 
   // 1. Codeforces Auto-Sync: Every 4 hours (0 */4 * * *)
@@ -29,11 +33,11 @@ function initScheduler() {
     try {
       const result = await syncCodeforces();
       const msg = result.message || `Synced ${result.count || 0} problem(s)`;
-      logSync('codeforces', 'sync_codeforces', 'success', msg);
+      await logSync('codeforces', 'sync_codeforces', 'success', msg);
       console.log(`[Scheduler] Automated Codeforces sync complete: ${msg}`);
     } catch (err) {
       console.error('[Scheduler] Automated Codeforces sync failed:', err.message);
-      logSync('codeforces', 'sync_codeforces', 'error', err.message);
+      await logSync('codeforces', 'sync_codeforces', 'error', err.message);
     }
   });
 
@@ -43,11 +47,11 @@ function initScheduler() {
     try {
       const result = await pushAllUnpushedProblems();
       const msg = result.message || `Pushed ${result.count || 0} problem(s) to GitHub`;
-      logSync('github', 'push_github', 'success', msg);
+      await logSync('github', 'push_github', 'success', msg);
       console.log(`[Scheduler] Automated GitHub push complete: ${msg}`);
     } catch (err) {
       console.error('[Scheduler] Automated GitHub push failed:', err.message);
-      logSync('github', 'push_github', 'error', err.message);
+      await logSync('github', 'push_github', 'error', err.message);
     }
   });
 

@@ -1,7 +1,7 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 const path = require('path');
 const fs = require('fs');
-const db = require('../db/init');
+const supabase = require('../db/init');
 
 // Fixed Master Topic Taxonomy List
 const MASTER_TOPICS = [
@@ -24,14 +24,15 @@ async function generateOptimalSolution(problem) {
 
   // Initialize Gemini Client
   const genAI = new GoogleGenerativeAI(apiKey);
-
   const model = genAI.getGenerativeModel({ model: 'gemini-flash-latest' });
 
   let topicsList = 'None';
   try {
-    const parsed = JSON.parse(problem.topics || '[]');
-    if (Array.isArray(parsed) && parsed.length > 0) {
-      topicsList = parsed.join(', ');
+    if (Array.isArray(problem.topics) && problem.topics.length > 0) {
+      topicsList = problem.topics.join(', ');
+    } else if (typeof problem.topics === 'string') {
+      const parsed = JSON.parse(problem.topics);
+      if (Array.isArray(parsed) && parsed.length > 0) topicsList = parsed.join(', ');
     }
   } catch (_) {}
 
@@ -63,7 +64,7 @@ CRITICAL: Respond STRICTLY using the exact format below, with delimiters:
 <put time/space complexity and approach explanation here>
 `;
 
-  console.log(`[Gemini AI Service] Requesting optimal solution for '${problem.title}' using gemini-2.5-flash...`);
+  console.log(`[Gemini AI Service] Requesting optimal solution for '${problem.title}' using gemini-flash-latest...`);
 
   try {
     const result = await model.generateContent(prompt);
@@ -86,33 +87,24 @@ CRITICAL: Respond STRICTLY using the exact format below, with delimiters:
       explanation = 'Optimal solution generated successfully.';
     }
 
-    // 1. Update database record
-    db.prepare(`
-      UPDATE problems
-      SET optimal_solution_code = ?, optimal_solution_explanation = ?
-      WHERE id = ?
-    `).run(code, explanation, problem.id);
-
-    // 2. If github file path exists, update local optimal_solution file in repo
-    if (problem.github_file_path) {
-      try {
-        const repoPath = path.join(__dirname, '../data/repo', problem.github_file_path);
-        if (fs.existsSync(repoPath)) {
-          const ext = getFileExtension(problem.my_solution_language);
-          const optFile = path.join(repoPath, `optimal_solution.${ext}`);
-          const content = `${code}\n\n/*\n=== EXPLANATION ===\n${explanation}\n*/`;
-          fs.writeFileSync(optFile, content, 'utf8');
-        }
-      } catch (fsErr) {
-        console.warn('[Gemini AI Service] Failed to update local repo file:', fsErr.message);
-      }
-    }
+    // 1. Update database record in Supabase
+    await supabase
+      .from('problems')
+      .update({
+        optimal_solution_code: code,
+        optimal_solution_explanation: explanation
+      })
+      .eq('id', problem.id);
 
     // Log sync action
-    db.prepare(`
-      INSERT INTO sync_log (platform, action, status, message)
-      VALUES (?, 'fetch', 'success', ?)
-    `).run(problem.platform || 'gemini', `Generated Gemini AI optimal solution for '${problem.title}'`);
+    await supabase
+      .from('sync_log')
+      .insert({
+        platform: problem.platform || 'gemini',
+        action: 'fetch',
+        status: 'success',
+        message: `Generated Gemini AI optimal solution for '${problem.title}'`
+      });
 
     console.log(`[Gemini AI Service] Successfully generated optimal solution for '${problem.title}'.`);
 
@@ -129,11 +121,15 @@ CRITICAL: Respond STRICTLY using the exact format below, with delimiters:
 }
 
 /**
- * Uses Gemini (gemini-2.5-flash) to analyze problem title and statement,
+ * Uses Gemini (gemini-flash-latest) to analyze problem title and statement,
  * suggesting topic tags and difficulty rating.
  */
 async function suggestTopicsAndDifficulty(problem) {
   const apiKey = process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.trim() : '';
+
+  if (!apiKey || apiKey === 'your_gemini_api_key_here') {
+    throw new Error('GEMINI_API_KEY is not configured in .env. Please get your key from https://aistudio.google.com/apikey and add it to .env.');
+  }
 
   const genAI = new GoogleGenerativeAI(apiKey);
   const model = genAI.getGenerativeModel({ model: 'gemini-flash-latest' });
@@ -192,18 +188,23 @@ Format:
     // Filter topics to ensure non-empty strings
     topics = topics.filter(t => typeof t === 'string' && t.trim().length > 0);
 
-    const topicsJson = JSON.stringify(topics);
-
-    // Update database row
-    db.prepare(`
-      UPDATE problems
-      SET topics = ?, difficulty = ?
-      WHERE id = ?
-    `).run(topicsJson, difficulty, problem.id);
+    // Update database row in Supabase
+    await supabase
+      .from('problems')
+      .update({
+        topics: topics, // Native JSONB array!
+        difficulty: difficulty
+      })
+      .eq('id', problem.id);
 
     // Insert topics into topics_master
-    const insertTopic = db.prepare('INSERT OR IGNORE INTO topics_master (name) VALUES (?)');
-    topics.forEach(t => insertTopic.run(t));
+    for (const t of topics) {
+      if (t && typeof t === 'string' && t.trim()) {
+        await supabase
+          .from('topics_master')
+          .upsert({ name: t.trim() }, { onConflict: 'name' });
+      }
+    }
 
     console.log(`[Gemini AI Auto-Tag] Saved '${problem.title}' -> Topics: [${topics.join(', ')}], Difficulty: ${difficulty}`);
 
@@ -219,9 +220,6 @@ Format:
   }
 }
 
-/**
- * Maps language to file extension.
- */
 function getFileExtension(lang) {
   if (!lang) return 'cpp';
   const l = lang.toLowerCase();
