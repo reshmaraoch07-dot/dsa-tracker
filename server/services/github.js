@@ -1,4 +1,3 @@
-const { Octokit } = require('@octokit/rest');
 const supabase = require('../db/init');
 
 /**
@@ -23,14 +22,15 @@ function parseRepoDetails() {
 }
 
 /**
- * Initializes Octokit REST client using GITHUB_TOKEN.
+ * Initializes Octokit REST client using dynamic import (for ES Module compatibility in CommonJS).
  */
-function getOctokitClient() {
+async function getOctokitClient() {
   const token = process.env.GITHUB_TOKEN ? process.env.GITHUB_TOKEN.trim() : '';
   if (!token || token === 'your_github_token_here') {
     throw new Error('GITHUB_TOKEN is not configured in environment variables.');
   }
 
+  const { Octokit } = await import('@octokit/rest');
   return new Octokit({ auth: token });
 }
 
@@ -40,7 +40,7 @@ function getOctokitClient() {
 async function ensureRepoCloned() {
   try {
     const { owner, repo } = parseRepoDetails();
-    const octokit = getOctokitClient();
+    const octokit = await getOctokitClient();
     const { data } = await octokit.rest.repos.get({ owner, repo });
     console.log(`[GitHub Service] Connected to remote repository '${data.full_name}'.`);
     return true;
@@ -95,7 +95,7 @@ async function pushProblemToGithub(problemId) {
   }
 
   const { owner, repo } = parseRepoDetails();
-  const octokit = getOctokitClient();
+  const octokit = await getOctokitClient();
 
   // 1. Determine folder path
   const platformFolder = (problem.platform || 'other').toLowerCase();
