@@ -1,4 +1,3 @@
-const cron = require('node-cron');
 const supabase = require('../db/init');
 const { syncCodeforces } = require('./codeforces');
 const { pushAllUnpushedProblems } = require('./github');
@@ -25,6 +24,7 @@ function initScheduler() {
     return;
   }
 
+  const cron = require('node-cron');
   console.log('[Scheduler] Initializing automated background sync schedules...');
 
   // 1. Codeforces Auto-Sync: Every 4 hours (0 */4 * * *)
