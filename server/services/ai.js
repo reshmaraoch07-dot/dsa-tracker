@@ -1,4 +1,3 @@
-const { GoogleGenerativeAI } = require('@google/generative-ai');
 const path = require('path');
 const fs = require('fs');
 const supabase = require('../db/init');
@@ -13,18 +12,54 @@ const MASTER_TOPICS = [
 ];
 
 /**
- * Generates an optimal solution & explanation using Google's Gemini API.
+ * Calls Google Gemini Interactions API using fetch.
+ */
+async function callGeminiInteractionsApi(apiKey, promptText, modelName = 'gemini-3.5-flash') {
+  const url = `https://generativelanguage.googleapis.com/v1beta/interactions?key=${apiKey}`;
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: modelName,
+      input: promptText
+    })
+  });
+
+  const data = await response.json();
+
+  if (!response.ok || data.error) {
+    const errMsg = data.error ? (data.error.message || JSON.stringify(data.error)) : `HTTP ${response.status}`;
+    throw new Error(`Google Gemini API Error (${response.status}): ${errMsg}`);
+  }
+
+  // Extract generated text from steps
+  if (Array.isArray(data.steps)) {
+    for (const step of data.steps) {
+      if (step.type === 'model_output' && Array.isArray(step.content)) {
+        for (const item of step.content) {
+          if (item.text) return item.text;
+        }
+      }
+    }
+  }
+
+  if (data.output && typeof data.output === 'string') {
+    return data.output;
+  }
+
+  return JSON.stringify(data);
+}
+
+/**
+ * Generates an optimal solution & explanation using Google's Gemini Interactions API.
  */
 async function generateOptimalSolution(problem) {
   const apiKey = process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.trim() : '';
 
   if (!apiKey || apiKey === 'your_gemini_api_key_here') {
-    throw new Error('GEMINI_API_KEY is not configured in .env. Please get your key from https://aistudio.google.com/apikey and add it to .env.');
+    throw new Error('GEMINI_API_KEY is not configured in environment variables.');
   }
-
-  // Initialize Gemini Client
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: 'gemini-flash-latest' });
 
   let topicsList = 'None';
   try {
@@ -64,12 +99,10 @@ CRITICAL: Respond STRICTLY using the exact format below, with delimiters:
 <put time/space complexity and approach explanation here>
 `;
 
-  console.log(`[Gemini AI Service] Requesting optimal solution for '${problem.title}' using gemini-flash-latest...`);
+  console.log(`[Gemini AI Service] Requesting optimal solution for '${problem.title}' using Gemini Interactions API...`);
 
   try {
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const responseText = response.text();
+    const responseText = await callGeminiInteractionsApi(apiKey, prompt);
 
     // Parse code and explanation using delimiters
     let code = '';
@@ -121,18 +154,15 @@ CRITICAL: Respond STRICTLY using the exact format below, with delimiters:
 }
 
 /**
- * Uses Gemini (gemini-flash-latest) to analyze problem title and statement,
+ * Uses Gemini Interactions API to analyze problem title and statement,
  * suggesting topic tags and difficulty rating.
  */
 async function suggestTopicsAndDifficulty(problem) {
   const apiKey = process.env.GEMINI_API_KEY ? process.env.GEMINI_API_KEY.trim() : '';
 
   if (!apiKey || apiKey === 'your_gemini_api_key_here') {
-    throw new Error('GEMINI_API_KEY is not configured in .env. Please get your key from https://aistudio.google.com/apikey and add it to .env.');
+    throw new Error('GEMINI_API_KEY is not configured in environment variables.');
   }
-
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: 'gemini-flash-latest' });
 
   const statement = problem.question_statement || problem.title;
 
@@ -161,9 +191,7 @@ Format:
   console.log(`[Gemini AI Auto-Tag] Categorizing '${problem.title}'...`);
 
   try {
-    const result = await model.generateContent(prompt);
-    const response = await result.response;
-    const rawText = response.text().trim();
+    const rawText = await callGeminiInteractionsApi(apiKey, prompt);
 
     // Strip markdown code fences if present
     const cleanJson = rawText.replace(/^```[a-z]*\n?/i, '').replace(/\n?```$/i, '').trim();
@@ -224,9 +252,9 @@ function getFileExtension(lang) {
   if (!lang) return 'cpp';
   const l = lang.toLowerCase();
   if (l.includes('c++') || l.includes('cpp') || l.includes('gcc') || l.includes('g++')) return 'cpp';
-  if (l.includes('python') || l.includes('py')) return 'py';
+  if (l.includes('py') || l.includes('python')) return 'py';
   if (l.includes('java')) return 'java';
-  if (l.includes('javascript') || l.includes('js') || l.includes('node')) return 'js';
+  if (l.includes('js') || l.includes('javascript') || l.includes('node')) return 'js';
   return 'cpp';
 }
 

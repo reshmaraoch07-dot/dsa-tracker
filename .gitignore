@@ -6,5 +6,5 @@ server/data/
 *.db-journal
 scratch/
 .DS_Store
-
 .vercel
+*.png
