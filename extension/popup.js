@@ -4,7 +4,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   const captureBtn = document.getElementById('capture-btn');
   const feedback = document.getElementById('feedback');
 
-  const SERVER_HEALTH_URL = 'http://localhost:4545/api/health';
+  const BASE_URL = typeof API_BASE_URL !== 'undefined' ? API_BASE_URL : 'https://dsa-tracker-beryl-sigma.vercel.app';
+  const SERVER_HEALTH_URL = `${BASE_URL}/api/health`;
 
   // 1. Check Server Connection Status
   async function checkServerConnection() {
@@ -12,13 +13,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       const res = await fetch(SERVER_HEALTH_URL);
       if (res.ok) {
         statusDot.className = 'dot online';
-        statusText.textContent = 'Server Connected (Port 4545)';
+        statusText.textContent = 'Server Connected (Vercel Live)';
       } else {
         throw new Error('Non-200 response');
       }
     } catch (_) {
       statusDot.className = 'dot offline';
-      statusText.textContent = 'Server Offline (Check Express)';
+      statusText.textContent = 'Server Offline (Check Vercel)';
     }
   }
 

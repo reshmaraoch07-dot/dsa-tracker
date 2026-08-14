@@ -1,7 +1,8 @@
 (function () {
   console.log('[DSA Tracker Extension] CodeChef content script loaded.');
 
-  const SERVER_CAPTURE_URL = 'http://localhost:4545/api/capture';
+  const BASE_URL = typeof API_BASE_URL !== 'undefined' ? API_BASE_URL : 'https://dsa-tracker-beryl-sigma.vercel.app';
+  const SERVER_CAPTURE_URL = `${BASE_URL}/api/capture`;
   let isCapturing = false;
 
   // --- On-Page Toast Feedback ---

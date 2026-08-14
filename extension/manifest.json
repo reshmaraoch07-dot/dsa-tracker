@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "DSA Tracker Auto-Capture",
   "version": "1.0.0",
-  "description": "Automatically captures accepted solutions from LeetCode & CodeChef and saves them to local DSA Tracker server.",
+  "description": "Automatically captures accepted solutions from LeetCode & CodeChef and saves them to DSA Tracker server.",
   "permissions": [
     "storage",
     "activeTab",
@@ -11,6 +11,7 @@
   "host_permissions": [
     "https://leetcode.com/*",
     "https://*.codechef.com/*",
+    "https://dsa-tracker-beryl-sigma.vercel.app/*",
     "http://localhost:4545/*"
   ],
   "action": {
@@ -29,12 +30,12 @@
   "content_scripts": [
     {
       "matches": ["https://leetcode.com/problems/*"],
-      "js": ["content-leetcode.js"],
+      "js": ["config.js", "content-leetcode.js"],
       "run_at": "document_end"
     },
     {
       "matches": ["https://*.codechef.com/*"],
-      "js": ["content-codechef.js"],
+      "js": ["config.js", "content-codechef.js"],
       "run_at": "document_end"
     }
   ]
