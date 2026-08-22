@@ -1,15 +1,26 @@
 const path = require('path');
-const Database = require('better-sqlite3');
+const { execSync } = require('child_process');
 const supabase = require('../server/db/supabaseClient');
+
+function readSqliteTable(tableName) {
+  const dbPath = path.join(__dirname, '../server/data/tracker.db');
+  try {
+    const output = execSync(`sqlite3 "${dbPath}" ".mode json" "SELECT * FROM ${tableName};"`, {
+      encoding: 'utf-8',
+      maxBuffer: 10 * 1024 * 1024
+    });
+    return JSON.parse(output.trim() || '[]');
+  } catch (err) {
+    console.error(`Error reading table ${tableName} from local tracker.db via sqlite3 CLI:`, err.message);
+    return [];
+  }
+}
 
 async function migrateData() {
   console.log('=== Starting Local SQLite -> Supabase Data Migration ===\n');
 
-  const dbPath = path.join(__dirname, '../server/data/tracker.db');
-  const sqliteDb = new Database(dbPath);
-
   // 1. Migrate Topics Master
-  const masterTopics = sqliteDb.prepare('SELECT * FROM topics_master').all();
+  const masterTopics = readSqliteTable('topics_master');
   console.log(`[1/3] Found ${masterTopics.length} topic(s) in local topics_master.`);
   
   for (const t of masterTopics) {
@@ -19,7 +30,7 @@ async function migrateData() {
   }
 
   // 2. Migrate Settings
-  const settings = sqliteDb.prepare('SELECT * FROM settings').all();
+  const settings = readSqliteTable('settings');
   console.log(`[2/3] Found ${settings.length} setting(s) in local settings.`);
 
   for (const s of settings) {
@@ -29,7 +40,7 @@ async function migrateData() {
   }
 
   // 3. Migrate Problems
-  const problems = sqliteDb.prepare('SELECT * FROM problems ORDER BY id ASC').all();
+  const problems = readSqliteTable('problems');
   console.log(`[3/3] Found ${problems.length} problem(s) in local tracker.db.`);
 
   let insertedCount = 0;
@@ -77,15 +88,15 @@ async function migrateData() {
 
   console.log('\n=== Migration Completed ===');
   console.log(`- Local SQLite Problems: ${problems.length}`);
-  console.log(`- Supabase Restored Problems: ${insertedCount}`);
+  console.log(`- Supabase Restored/Upserted Problems: ${insertedCount}`);
   console.log(`- Errors/Skipped: ${skippedCount}`);
 
-  // Query Supabase total
+  // Query Supabase total count
   const { count: finalCount } = await supabase
     .from('problems')
     .select('*', { count: 'exact', head: true });
 
-  console.log(`\nVerified Supabase total row count: ${finalCount || 0}`);
+  console.log(`\nVerified Supabase total problem row count: ${finalCount || 0}`);
 }
 
 migrateData().catch(err => {
