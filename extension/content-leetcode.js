@@ -4,6 +4,8 @@
   const BASE_URL = typeof API_BASE_URL !== 'undefined' ? API_BASE_URL : 'https://dsa-tracker-beryl-sigma.vercel.app';
   const SERVER_CAPTURE_URL = `${BASE_URL}/api/capture`;
   let isCapturing = false;
+  let lastCapturedSlug = null;
+  let lastCapturedTime = 0;
 
   // --- On-Page Toast Feedback ---
   function showOnPageToast(message, type = 'success') {
@@ -16,14 +18,14 @@
         top: 20px;
         right: 20px;
         z-index: 999999;
-        padding: 12px 20px;
+        padding: 14px 22px;
         border-radius: 10px;
         font-family: system-ui, -apple-system, sans-serif;
         font-size: 14px;
         font-weight: 600;
         color: #ffffff;
-        box-shadow: 0 8px 24px rgba(0,0,0,0.4);
-        transition: all 0.3s ease;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         pointer-events: none;
       `;
       document.body.appendChild(toast);
@@ -44,7 +46,7 @@
     setTimeout(() => {
       toast.style.opacity = '0';
       toast.style.transform = 'translateY(-10px)';
-    }, 4000);
+    }, 5000);
   }
 
   // --- Extract Problem Slug from URL ---
@@ -53,36 +55,55 @@
     return match ? match[1] : null;
   }
 
-  // --- Extract Submitted Code from Monaco Editor ---
+  // --- Extract Submitted Code from DOM ---
   function getCodeFromDOM() {
-    // Attempt 1: Get view-lines text content
+    // Attempt 1: Monaco Editor view lines
     const viewLines = document.querySelectorAll('.view-lines .view-line');
     if (viewLines.length > 0) {
-      return Array.from(viewLines).map(line => line.textContent).join('\n');
+      const code = Array.from(viewLines).map(line => line.textContent).join('\n');
+      if (code.trim()) return code;
     }
 
-    // Attempt 2: General editor code blocks
+    // Attempt 2: CodeMirror lines
+    const cmLines = document.querySelectorAll('.CodeMirror-line');
+    if (cmLines.length > 0) {
+      const code = Array.from(cmLines).map(line => line.textContent).join('\n');
+      if (code.trim()) return code;
+    }
+
+    // Attempt 3: General code blocks
     const codeEl = document.querySelector('code, pre');
-    if (codeEl) return codeEl.textContent;
+    if (codeEl && codeEl.textContent.trim()) return codeEl.textContent;
 
     return '';
   }
 
   // --- Extract Selected Programming Language ---
   function getLanguageFromDOM() {
-    const langBtn = document.querySelector('[data-cy="lang-select"], button[id*="headlessui-listbox-button"]');
-    if (langBtn) {
-      return langBtn.textContent.trim();
+    const selectors = [
+      '[data-cy="lang-select"]',
+      'button[id*="headlessui-listbox-button"]',
+      'button[class*="lang"]',
+      'div[class*="language-select"]'
+    ];
+    for (const sel of selectors) {
+      const el = document.querySelector(sel);
+      if (el && el.textContent.trim()) {
+        return el.textContent.trim().toLowerCase();
+      }
     }
-    return 'javascript';
+    return 'cpp';
   }
 
-  // --- Query LeetCode GraphQL API for Metadata ---
+  // --- Query LeetCode GraphQL API for Problem Metadata ---
   async function fetchLeetCodeGraphQL(titleSlug) {
     try {
       const res = await fetch('https://leetcode.com/graphql', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        credentials: 'include',
         body: JSON.stringify({
           query: `
             query questionData($titleSlug: String!) {
@@ -99,33 +120,41 @@
         })
       });
 
-      if (!res.ok) return null;
+      if (!res.ok) {
+        console.warn(`[DSA Tracker Extension] GraphQL HTTP status ${res.status}`);
+        return null;
+      }
       const data = await res.json();
       return data.data ? data.data.question : null;
     } catch (err) {
-      console.warn('[DSA Tracker Extension] LeetCode GraphQL query failed:', err);
+      console.warn('[DSA Tracker Extension] LeetCode GraphQL fetch failed:', err.message);
       return null;
     }
   }
 
   // --- Main Capture Logic ---
-  async function captureLeetCodeSolution() {
-    if (isCapturing) return;
+  async function captureLeetCodeSolution(manual = false) {
     const slug = getTitleSlug();
-    if (!slug) return;
+    if (!slug) {
+      console.error('[DSA Tracker Extension] Cannot capture: No problem slug found in URL.');
+      if (manual) showOnPageToast('Capture Failed: Not on a problem page', 'error');
+      return;
+    }
 
-    // Check chrome.storage.local to avoid sending duplicate submission
-    const storageKey = `lc_sent_${slug}`;
-    const stored = await chrome.storage.local.get(storageKey);
-    const lastSentTime = stored[storageKey];
+    // Cooldown check (prevent duplicate triggers within 60s for same slug)
+    const now = Date.now();
+    if (!manual && lastCapturedSlug === slug && (now - lastCapturedTime < 60000)) {
+      console.log(`[DSA Tracker Extension] Cooldown active for '${slug}'. Skipping duplicate capture.`);
+      return;
+    }
 
-    // If sent within the last 3 minutes, skip auto-capture
-    if (lastSentTime && (Date.now() - lastSentTime < 180000)) {
+    if (isCapturing) {
+      console.log('[DSA Tracker Extension] Capture already in progress...');
       return;
     }
 
     isCapturing = true;
-    console.log('[DSA Tracker Extension] Capturing LeetCode submission for:', slug);
+    console.log(`[DSA Tracker Extension] Starting capture for '${slug}' to ${SERVER_CAPTURE_URL}...`);
 
     try {
       const code = getCodeFromDOM();
@@ -150,6 +179,8 @@
         solved_at: new Date().toISOString()
       };
 
+      console.log('[DSA Tracker Extension] Sending capture payload:', payload);
+
       const res = await fetch(SERVER_CAPTURE_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -157,35 +188,85 @@
       });
 
       if (res.ok) {
-        await chrome.storage.local.set({ [storageKey]: Date.now() });
-        showOnPageToast('✓ Captured! Sent to DSA Tracker', 'success');
+        lastCapturedSlug = slug;
+        lastCapturedTime = now;
+        console.log(`[DSA Tracker Extension] Successfully captured '${title}'!`);
+        showOnPageToast(`✓ Captured! Saved '${title}' to DSA Tracker`, 'success');
       } else {
-        throw new Error(`Server returned HTTP ${res.status}`);
+        const errorText = await res.text();
+        throw new Error(`Server HTTP ${res.status}: ${errorText || res.statusText}`);
       }
     } catch (err) {
       console.error('[DSA Tracker Extension] Capture failed:', err);
-      showOnPageToast(`Capture Failed: ${err.message}`, 'error');
+      showOnPageToast(`Capture Failed: ${err.message} — see console`, 'error');
     } finally {
       isCapturing = false;
     }
   }
 
-  // --- Observe DOM for "Accepted" Status ---
-  const observer = new MutationObserver(() => {
-    // Check if DOM contains green "Accepted" result panel
-    const acceptedEl = document.querySelector('[data-e2e-locator="submission-result"]');
-    const textMatches = document.body.innerText.includes('Accepted');
+  // --- Helper: Check if element indicates Accepted ---
+  function isAcceptedElement(el) {
+    if (!el || !el.textContent) return false;
+    const text = el.textContent.trim();
+    if (text !== 'Accepted' && text !== 'ACCEPTED') return false;
 
-    if ((acceptedEl && acceptedEl.textContent.includes('Accepted')) || textMatches) {
-      // Check if green accepted badge is visible
-      const isAccepted = Array.from(document.querySelectorAll('span, div')).some(
-        el => el.textContent.trim() === 'Accepted' && (window.getComputedStyle(el).color.includes('46, 170, 77') || window.getComputedStyle(el).color.includes('40, 167, 69') || el.classList.contains('text-sd-easy'))
-      );
-
-      if (isAccepted) {
-        captureLeetCodeSolution();
-      }
+    // Check class list
+    const className = el.className || '';
+    if (typeof className === 'string' && (
+      className.includes('text-sd-easy') ||
+      className.includes('text-sd-green') ||
+      className.includes('text-green-s') ||
+      className.includes('text-green-60') ||
+      className.includes('text-emerald') ||
+      className.includes('text-green')
+    )) {
+      return true;
     }
+
+    // Check computed color
+    try {
+      const style = window.getComputedStyle(el);
+      const color = style.color || '';
+      if (
+        color.includes('46, 170, 77') ||
+        color.includes('40, 167, 69') ||
+        color.includes('44, 187, 93') ||
+        color.includes('0, 184, 163') ||
+        color.includes('34, 197, 94') ||
+        color.includes('16, 185, 129')
+      ) {
+        return true;
+      }
+    } catch (_) {}
+
+    return true; // Fallback: text is exactly 'Accepted' inside submission result panel
+  }
+
+  // --- Observe DOM for "Accepted" Submission Result ---
+  let debounceTimer = null;
+
+  const observer = new MutationObserver(() => {
+    if (debounceTimer) clearTimeout(debounceTimer);
+
+    debounceTimer = setTimeout(() => {
+      // Locator 1: Standard submission result container
+      const resultState = document.querySelector('[data-e2e-locator="submission-result"], [data-e2e-locator="result-state"]');
+      if (resultState && resultState.textContent.includes('Accepted')) {
+        console.log('[DSA Tracker Extension] Accepted result state detected via locator.');
+        captureLeetCodeSolution();
+        return;
+      }
+
+      // Locator 2: Search for any green "Accepted" span or div
+      const candidates = document.querySelectorAll('span, div, h4, p');
+      for (const el of candidates) {
+        if (isAcceptedElement(el)) {
+          console.log('[DSA Tracker Extension] Accepted badge detected via DOM scan.');
+          captureLeetCodeSolution();
+          return;
+        }
+      }
+    }, 500); // 500ms debounce
   });
 
   observer.observe(document.body, { childList: true, subtree: true });
@@ -193,10 +274,12 @@
   // --- Listen for Manual Popup Trigger ---
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.action === 'manual_capture') {
-      captureLeetCodeSolution().then(() => {
+      captureLeetCodeSolution(true).then(() => {
         sendResponse({ success: true });
       });
       return true;
     }
   });
+
+  console.log('[DSA Tracker Extension] MutationObserver active for LeetCode submission results.');
 })();
